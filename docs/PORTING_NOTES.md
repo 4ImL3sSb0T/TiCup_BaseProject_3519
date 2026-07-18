@@ -37,14 +37,14 @@ init done. try: help / chassis status / motor 0x3 status
 
 命令通道：
 
-- Debug UART0 / WiFi / UART3（A14/A13）
+- Debug UART0 / WiFi（UART3 暂禁用）
 - 示例：`help`、`chassis status`、`motor 0x3 status`
 
 ## 已知注意点
 
 | 项 | 说明 |
 |----|------|
-| A14 | 核心板 LED + UART3 TX 可能共用，见 `尽量不要使用的引脚.txt` |
+| A14 | 核心板 LED；UART3 已禁用，见 `尽量不要使用的引脚.txt` |
 | 无 UART2 | 3519 硬件无 UART2；同脚位用 UART7 |
 | Flash 参数区 | `storage` 模块未加入当前 Keil 工程；启用时需按 3519 Flash 扇区重配 |
 | GUI/按键 | `mjc_input_button` 引脚需按实板确认 |

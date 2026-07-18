@@ -7,7 +7,9 @@
 
 | 项 | 值 |
 |----|-----|
-| 平台 | MSPM0G3519 + 逐飞 SEEKFREE 开源库（**3519 专用，勿混 3507 库**） |
+| 平台（固件） | MSPM0G3519 + 逐飞 SEEKFREE 开源库（**3519 专用，勿混 3507 库**） |
+| **实物主板** | **目前使用 MSPM0G3507 主板**；**尚无 3519 专用主板**（核心板可上 3519，底板按 3507 图） |
+| 主板全引脚图 | 见 **`docs/motherboard_3507_pinout.md`**（丝印 / 可接外设全集） |
 | 工程 | `BaseProject_3519` |
 | 主时钟 | 80 MHz（`clock_init(SYSTEM_CLOCK_80M)`） |
 | 参考库例程 | `D:\Project\TI_Cup\MSPM0G3519_Library-master\Example\` |
@@ -42,7 +44,7 @@
 | 系统 1ms 节拍 | PIT_TIM_G12 | —（无 GPIO） | `sys_time_ms` | — |
 | 调试串口 | UART0 | **A10 TX / A11 RX** | 115200 | 核心板 debug |
 | 核心板蓝灯 | GPIO | **A14** | 500ms soft_timer 翻转 | E01_gpio_demo |
-| 命令串口 UART3 | UART3 | A14 TX / A13 RX | **与 LED 冲突，LED 优先时 TX 不可用** | — |
+| 命令入口 | WiFi SPI + UART0 | 见 §5 | **UART3 暂禁用**（避免 A13/A14 冲突） | — |
 | 日志默认 | WiFi SPI 或 UART | 见 §5 | `sys_log_init(SYS_LOG_WIFI)` | — |
 | IMU | SPI1 | B23/B22/B21 + CS B19 | IMU963RA 默认 SPI | E4_03_imu963ra |
 
@@ -87,8 +89,8 @@
 | A1 | 左电机 DIR |
 | A10 | UART0 TX（调试） |
 | A11 | UART0 RX（调试） |
-| A14 | **核心板 LED**（心跳；与 UART3_TX 互斥） |
-| A13 | UART3 RX / 亦可能被屏 BL、WiFi MISO 等占用，见 §5–6 |
+| A14 | **核心板 LED**（心跳） |
+| A13 | WiFi SPI MISO（屏 BL 启用时亦可能占用，见 §5–6） |
 | A26 | 左编码器 CH1 |
 | A27 | 左编码器 CH2 |
 | B7 | 右编码器 CH1 |
@@ -114,7 +116,7 @@
 
 | 冲突 | 引脚 | 现状与策略 |
 |------|------|------------|
-| **LED vs UART3_TX** | A14 | `main` 在 `cmd_service_init` 后 `gpio_init(A14)`，**LED 心跳优先**。命令改走 UART0 / WiFi。若必须用 UART3 TX，关掉 LED 定时器并更新本文。 |
+| **UART3 暂禁用** | A14/A13 | 原命令串口 UART3（TX A14 / RX A13）已关闭，释放给 **LED + WiFi MISO**。恢复时需改 `cmd_service.c` 并评估与 LED/WiFi 的互斥。 |
 | **右电机 DIR vs GUI 按键例程** | B13 | `mjc_input_button.c` 示例用 B13 等，与右电机 DIR **冲突**。启用屏按键前必须改脚并更新本文。 |
 | **SPI0 总线** | A9/A12/A13… | WiFi SPI 与 IPS 屏常共用 SPI0 不同 CS，同时启用前查库头文件。 |
 | **3519 无 UART2** | — | 原 3507 的 UART2 场景改 **UART7** 或其它实例。 |
@@ -155,8 +157,9 @@
 
 | 通道 | 外设 | 引脚 | 波特率 / 速率 | 用途 |
 |------|------|------|---------------|------|
-| 调试 | UART0 | A10/A11 | 115200 | `debug_init` / printf |
-| 命令 | UART3 | A14/A13 | 115200 | `cmd_service`（TX 与 LED 冲突） |
+| 调试 + 命令 | UART0 | A10/A11 | 115200 | `debug_init` / printf / `cmd_service` |
+| 命令 WiFi | SPI0 + 控制脚 | 同日志 WiFi | 30 MHz SPI | `cmd_service` 读 WiFi 缓冲 |
+| ~~命令 UART3~~ | ~~UART3~~ | ~~A14/A13~~ | — | **暂禁用**，勿接线依赖 |
 | 日志 WiFi | SPI0 + 控制脚 | SCK A12, MOSI A9, MISO A13, CS B20, INT A17, RST A16 | 30 MHz SPI | `sys_log` / `WIFI_SPI_*` |
 
 日志类型：`SYS_LOG_UART` / `SYS_LOG_WIFI`（见 `sys_log.h`）。当前 `main` 使用 `sys_log_init(SYS_LOG_WIFI)` 时需接 WiFi SPI 模块。
@@ -180,7 +183,7 @@
 ### 6.2 显示屏（库默认，本工程未必初始化）
 
 典型 IPS200 SPI：`SPI0`，SCK A12，MOSI A9，RST A7，DC A15，CS A8，BLK A13 等。  
-**启用 GUI 前**：对照 §3 占用表，避免与 WiFi / UART3 / 电机冲突。
+**启用 GUI 前**：对照 §3 占用表，避免与 WiFi / 电机冲突。
 
 ### 6.3 GUI 按键示例（未与电机共存）
 
@@ -225,13 +228,15 @@
 | 2026-07-18 | 初版：汇总电机/正交编码器/PIT/UART/LED/IMU/WiFi 及冲突策略 |
 | 2026-07-18 | 编码器由方向模式(G6/G7)改为正交(G8/G9, A26/A27, B7/B9) |
 | 2026-07-18 | 增加 A14 LED soft_timer 心跳（优先于 UART3_TX） |
+| 2026-07-18 | 禁用命令 UART3；命令仅 WiFi SPI + Debug UART0；A13 专供 WiFi MISO |
 
 ---
 
 ## 10. 相关文档
 
+- **`docs/motherboard_3507_pinout.md`** — **3507 主板引脚原图修正表**（现用底板；无 3519 主板）  
 - `docs/MSPM0G3507_vs_MSPM0G3519.md` — 芯片与资源差异  
 - `docs/PORTING_NOTES.md` — 从 3507 工程移植步骤  
-- `CLAUDE.md` — 工程总览（硬件细节以**本文**为准）  
+- `CLAUDE.md` — 工程总览（**软件已启用资源**以本文为准；**主板丝印**以 `motherboard_3507_pinout.md` 为准）  
 - `project/尽量不要使用的引脚.txt` — 逐飞核心板禁用脚原文  
 )

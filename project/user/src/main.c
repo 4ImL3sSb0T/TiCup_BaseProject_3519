@@ -31,11 +31,11 @@
  *   - 电机 PWM: TIM_A0 (A0/B12) + DIR GPIO (A1/B13)
  *   - 编码器:   TIM_G8 / TIM_G9（正交模式 A26/A27、B7/B9）
  *   - 1ms 节拍: PIT_TIM_G12  (不可用 A0；正交已占 G8/G9)
- *   - 调试串口: UART0 (A10/A11)
- *   - 核心板 LED: A14（E01_gpio_demo，与 UART3_TX 冲突，心跳优先占 A14）
- *   - 命令串口: UART3 (A14/A13)  // LED 启用时 TX 不可用，改用 debug UART / WiFi
+ *   - 调试串口: UART0 (A10/A11)，兼命令入口
+ *   - 核心板 LED: A14（E01_gpio_demo）
+ *   - 命令入口: WiFi SPI + Debug UART0（UART3 暂禁用，避免抢 A13/A14）
  *   - 3519 无 UART2；同引脚场景可用 UART7 兼容
- *   - 日志默认: 调试串口 (SYS_LOG_UART)；有 WiFi SPI 模块可改 SYS_LOG_WIFI
+ *   - 日志: main 中 sys_log_init，可为 SYS_LOG_WIFI / SYS_LOG_UART
  *
  * 多速率任务:
  *   - 1ms  soft: imu_update（匹配 Madgwick sampleFreq=1000）
@@ -135,13 +135,13 @@ static void app_init(void)
         sys_log_text(info, "param_init ok");
     }
 
-    /* 5. 命令服务（WiFi / Debug UART / UART3） */
+    /* 5. 命令服务（WiFi + Debug UART0；UART3 暂禁用） */
     cmd_service_init();
-    sys_log_text(info, "cmd_service_init ok (UART3 A14/A13, debug UART0)");
+    sys_log_text(info, "cmd_service_init ok (wifi + debug UART0; UART3 off)");
 
-    /* 5b. 核心板 LED（A14，覆盖 UART3_TX 复用，与 E01_gpio_demo 一致） */
+    /* 5b. 核心板 LED（A14，与 E01_gpio_demo 一致） */
     gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
-    sys_log_text(info, "LED heartbeat on A14 (UART3_TX released)");
+    sys_log_text(info, "LED heartbeat on A14");
 
     /* 6. 双电机 + 双编码器（DRV8701） */
     if (motor_init() != EXIT_OK) {

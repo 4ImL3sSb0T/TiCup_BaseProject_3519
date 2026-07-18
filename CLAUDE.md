@@ -9,7 +9,8 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 
 芯片对比与移植说明见：
 
-- **`docs/hardware.md`（硬件/引脚必读，改脚前必须查阅并回写）**
+- **`docs/hardware.md`（软件已占用资源必读，改脚前必须查阅并回写）**
+- **`docs/motherboard_3507_pinout.md`（现用 3507 主板丝印/全引脚表；尚无 3519 主板）**
 - `docs/MSPM0G3507_vs_MSPM0G3519.md`
 - `docs/PORTING_NOTES.md`
 
@@ -43,9 +44,9 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 | 电机 | TIM_A0：左 A0/A1，右 B12/B13 |
 | 编码器 | TIM_G8/G9 正交：A26/A27、B7/B9 |
 | 1ms 节拍 | PIT_TIM_G12 |
-| LED | A14（500ms 心跳，优先于 UART3_TX） |
+| LED | A14（500ms 心跳） |
 | 调试 | UART0（A10/A11） |
-| 命令 | UART3（A14/A13，与 LED 冲突） |
+| 命令 | WiFi SPI + UART0（UART3 暂禁用） |
 
 ## 3519 注意
 

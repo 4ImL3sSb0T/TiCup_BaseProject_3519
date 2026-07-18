@@ -64,7 +64,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 // 官方注释：原 UART2 引脚可用 UART7 兼容
 ```
 
-本工程命令串口使用 **UART3（A14/A13）**，两端均存在，无需改通道号。
+本工程命令入口当前为 **WiFi SPI + Debug UART0**；**UART3（A14/A13）暂禁用**（两端芯片均有 UART3，恢复时改 `cmd_service` 即可）。
 
 ---
 
@@ -116,7 +116,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 见 `project/尽量不要使用的引脚.txt`：
 
 - 特殊功能：`A19, A20, A5, A6, A4, A3`
-- **A14**：核心板 LED，本工程 UART3 TX 也用到；若 LED 与串口冲突需改引脚或改灯控
+- **A14**：核心板 LED（命令 UART3 已禁用，不再与 LED 抢 TX）
 
 ---
 
@@ -153,7 +153,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 | 编码器右 | TIM_G9，CH1=`B7`，CH2=`B9`（正交） |
 | 系统 1ms | `PIT_TIM_G12` |
 | 调试串口 | UART0（A10/A11） |
-| 命令串口 | UART3（A14/A13） |
+| 命令入口 | WiFi SPI + UART0（UART3 暂禁用） |
 
 与逐飞 3519 主板电机/编码器例程引脚一致，无需为换芯改脚（除非板级丝印不同）。
 

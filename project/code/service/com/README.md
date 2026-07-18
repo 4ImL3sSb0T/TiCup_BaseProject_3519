@@ -14,17 +14,17 @@
 
 ### 1) 输入源与调度
 
-当前支持 4 路输入源:
+当前支持 2 路输入源:
 
 - WiFi SPI
-- Debug 串口环形缓冲
-- UART2 中断接收
-- UART3 中断接收
+- Debug 串口环形缓冲（UART0）
+
+（UART3 暂禁用，避免与 A14 LED / A13 WiFi MISO 冲突。）
 
 调度方式:
 
-- `cmd_service_init()` 初始化 FIFO 与 UART2/UART3 接收中断
-- `cmd_service_task()` 周期运行（当前工程由 soft timer 每 30ms 异步触发）
+- `cmd_service_init()` 初始化各通道 FIFO（不初始化 UART3）
+- `cmd_service_task()` 周期运行（当前工程由 soft timer 每 20ms 触发）
 
 ### 2) 命令帧协议（行协议）
 
@@ -71,14 +71,10 @@ navigator status\n
 
 ## 技术要点
 
-### 1) 并发模型（UART 通道）
+### 1) 输入轮询模型
 
-UART2/UART3 由中断写入 FIFO，`cmd_service_task` 读取 FIFO。
-为避免并发读写同一 FIFO 元数据导致竞争，当前实现采用最小临界区策略:
-
-- 在任务侧处理 UART 通道前临时 `interrupt_disable(LPUARTx_IRQn)`
-- 完成“取一条完整命令行”后立即 `interrupt_enable(LPUARTx_IRQn)`
-- `parse_command()` 与 `cmd_ack_emit()` 在临界区外执行，减少关中断时间
+WiFi SPI 与 Debug UART0 均由 `cmd_service_task` 轮询读入各自 FIFO，再按行解析。
+（若日后恢复 UART 中断接收通道，需在任务侧对对应 IRQ 做短临界区保护 FIFO。）
 
 ### 2) 长命令保护
 
