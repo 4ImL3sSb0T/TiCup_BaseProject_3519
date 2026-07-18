@@ -1,0 +1,87 @@
+# ============================================================
+# BaseProject_3519 — Keil MDK / MSPM0G3519
+# ============================================================
+
+# ------------------------------------------------------------
+# Keil MDK 编译输出
+# ------------------------------------------------------------
+project/mdk/Objects/
+project/mdk/Listings/
+project/mdk/DebugConfig/
+project/mdk/RTE/
+
+# 用户本机 GUI 布局（含窗口位置等，与工程无关）
+*.uvguix.*
+*.uvguix
+
+# 构建中间 / 产物
+*.o
+*.d
+*.crf
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.lnp
+*.dep
+*.htm
+*.build_log.htm
+*.sct.bak
+*.bak
+
+# Keil 临时 / 浏览信息
+*.__i
+*.iex
+*.tra
+*.sct.d
+EventRecorderStub.scvd
+*.scvd
+
+# ------------------------------------------------------------
+# 其他 IDE / 编辑器
+# ------------------------------------------------------------
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/c_cpp_properties.json
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# ------------------------------------------------------------
+# 操作系统
+# ------------------------------------------------------------
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ------------------------------------------------------------
+# 日志 / 本地配置 / 杂项
+# ------------------------------------------------------------
+*.log
+*.tmp
+*.temp
+*.user
+*.user.*
+local.properties
+
+# Python（库内脚本 / 工具）
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 压缩包与备份
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
