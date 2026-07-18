@@ -1,24 +1,17 @@
 /*
- * STM32H750 LittleFS Port — SPI NOR Flash via SFUD
+ * MSPM0G3519 LittleFS Port — DATA Flash via bsp_flash
  *
- * Block-device callbacks bridging LittleFS to the SFUD universal
- * flash driver.  SFUD auto-detects the flash chip, so this port
- * works with any supported SPI NOR Flash without manual changes.
- *
- * Call lfs_port_init() once during system startup (before mounting).
+ * bare-metal：静态缓冲，无 malloc，无线程锁。
+ * LFS 负责 erase-before-prog；prog 只写已擦区域。
  *
  * SPDX-License-Identifier: BSD-3-Clause
  */
 
 #include "lfs_port.h"
-#include "sfud.h"
+#include "bsp/flash/bsp_flash.h"
+
 #include <stddef.h>
-
-/* FreeRTOS mutex for thread safety */
-#include "FreeRTOS.h"
-#include "semphr.h"
-
-static SemaphoreHandle_t g_lfs_mutex = NULL;
+#include <string.h>
 
 /* ── Static buffers ─────────────────────────────────────────────── */
 
@@ -29,26 +22,22 @@ uint8_t lfs_lookahead_buf[LFS_FLASH_LOOKAHEAD_SIZE];
 /* ── Global configuration ───────────────────────────────────────── */
 
 struct lfs_config g_lfs_cfg = {
-    .context       = NULL,
-    .read          = lfs_port_read,
-    .prog          = lfs_port_prog,
-    .erase         = lfs_port_erase,
-    .sync          = lfs_port_sync,
-#ifdef LFS_THREADSAFE
-    .lock          = lfs_port_lock,
-    .unlock        = lfs_port_unlock,
-#endif
+    .context        = NULL,
+    .read           = lfs_port_read,
+    .prog           = lfs_port_prog,
+    .erase          = lfs_port_erase,
+    .sync           = lfs_port_sync,
 
-    .read_size     = LFS_FLASH_READ_SIZE,      /*   1 */
-    .prog_size     = LFS_FLASH_PROG_SIZE,      /* 256 */
-    .block_size    = LFS_FLASH_BLOCK_SIZE,     /* 4096 */
-    .block_count   = LFS_FLASH_BLOCK_COUNT,
-    .block_cycles  = 500,
+    .read_size      = LFS_FLASH_READ_SIZE,
+    .prog_size      = LFS_FLASH_PROG_SIZE,
+    .block_size     = LFS_FLASH_BLOCK_SIZE,
+    .block_count    = LFS_FLASH_BLOCK_COUNT,
+    .block_cycles   = 500,
 
-    .cache_size    = LFS_FLASH_CACHE_SIZE,     /* 256 */
-    .lookahead_size= LFS_FLASH_LOOKAHEAD_SIZE, /*  32 */
-    .read_buffer   = lfs_read_buf,
-    .prog_buffer   = lfs_prog_buf,
+    .cache_size     = LFS_FLASH_CACHE_SIZE,
+    .lookahead_size = LFS_FLASH_LOOKAHEAD_SIZE,
+    .read_buffer    = lfs_read_buf,
+    .prog_buffer    = lfs_prog_buf,
     .lookahead_buffer = lfs_lookahead_buf,
 
     .name_max       = 0,
@@ -61,75 +50,96 @@ struct lfs_config g_lfs_cfg = {
 
 /* ── Public API ─────────────────────────────────────────────────── */
 
-void lfs_port_init(void)
+int lfs_port_init(void)
 {
-    sfud_init();
+    uint32_t size;
+    uint32_t sectors;
 
-    g_lfs_cfg.context = sfud_get_device(0);
-
-    if (g_lfs_mutex == NULL) {
-        g_lfs_mutex = xSemaphoreCreateMutex();
+    if (bsp_flash_init() != BSP_FLASH_OK) {
+        return LFS_ERR_IO;
     }
+
+    size    = bsp_flash_size();
+    sectors = bsp_flash_sector_count();
+
+    if ((size == 0u) || (sectors == 0u)) {
+        return LFS_ERR_IO;
+    }
+
+    /* 几何校验：LFS block = 物理扇区 */
+    if (bsp_flash_sector_size() != LFS_FLASH_BLOCK_SIZE) {
+        return LFS_ERR_IO;
+    }
+    if (bsp_flash_prog_size() != LFS_FLASH_PROG_SIZE) {
+        return LFS_ERR_IO;
+    }
+
+    g_lfs_cfg.block_count = sectors;
+    g_lfs_cfg.block_size  = LFS_FLASH_BLOCK_SIZE;
+    g_lfs_cfg.prog_size   = LFS_FLASH_PROG_SIZE;
+    g_lfs_cfg.read_size   = LFS_FLASH_READ_SIZE;
+
+    return 0;
 }
 
 /* ── Block-device callbacks ───────────────────────────────────────
  *
- * Address translation:  physical_addr = block * block_size + off
- *
- * LFS handles erase-before-prog — prog callback writes to already-
- * erased pages only, so sfud_write() (no auto-erase) is correct.
+ * physical_offset = block * block_size + off
  */
-
-static sfud_flash *get_flash(const struct lfs_config *c)
-{
-    return (sfud_flash *)c->context;
-}
 
 int lfs_port_read(const struct lfs_config *c, lfs_block_t block,
                   lfs_off_t off, void *buffer, lfs_size_t size)
 {
-    sfud_flash *flash = get_flash(c);
-    uint32_t addr = (uint32_t)block * c->block_size + off;
-    return sfud_read(flash, addr, size, (uint8_t *)buffer) == SFUD_SUCCESS ? 0 : LFS_ERR_IO;
+    uint32_t offset;
+
+    (void)c;
+    if ((block >= g_lfs_cfg.block_count) || (buffer == NULL)) {
+        return LFS_ERR_IO;
+    }
+
+    offset = (uint32_t)block * LFS_FLASH_BLOCK_SIZE + (uint32_t)off;
+    if (bsp_flash_read(offset, buffer, (uint32_t)size) != BSP_FLASH_OK) {
+        return LFS_ERR_IO;
+    }
+    return 0;
 }
 
 int lfs_port_prog(const struct lfs_config *c, lfs_block_t block,
                   lfs_off_t off, const void *buffer, lfs_size_t size)
 {
-    sfud_flash *flash = get_flash(c);
-    uint32_t addr = (uint32_t)block * c->block_size + off;
-    return sfud_write(flash, addr, size, (const uint8_t *)buffer) == SFUD_SUCCESS ? 0 : LFS_ERR_IO;
+    uint32_t offset;
+
+    (void)c;
+    if ((block >= g_lfs_cfg.block_count) || (buffer == NULL)) {
+        return LFS_ERR_IO;
+    }
+    if (((off & (LFS_FLASH_PROG_SIZE - 1u)) != 0u) ||
+        ((size & (LFS_FLASH_PROG_SIZE - 1u)) != 0u)) {
+        return LFS_ERR_IO;
+    }
+
+    offset = (uint32_t)block * LFS_FLASH_BLOCK_SIZE + (uint32_t)off;
+    if (bsp_flash_write(offset, buffer, (uint32_t)size) != BSP_FLASH_OK) {
+        return LFS_ERR_IO;
+    }
+    return 0;
 }
 
 int lfs_port_erase(const struct lfs_config *c, lfs_block_t block)
 {
-    sfud_flash *flash = get_flash(c);
-    uint32_t addr = (uint32_t)block * c->block_size;
-    return sfud_erase(flash, addr, c->block_size) == SFUD_SUCCESS ? 0 : LFS_ERR_IO;
+    (void)c;
+    if (block >= g_lfs_cfg.block_count) {
+        return LFS_ERR_IO;
+    }
+
+    if (bsp_flash_erase_sector((uint32_t)block) != BSP_FLASH_OK) {
+        return LFS_ERR_IO;
+    }
+    return 0;
 }
 
 int lfs_port_sync(const struct lfs_config *c)
 {
     (void)c;
     return 0;
-}
-
-/* ── Thread safety callbacks ──────────────────────────────────────── */
-
-int lfs_port_lock(const struct lfs_config *c)
-{
-    (void)c;
-    if (g_lfs_mutex != NULL) {
-        return xSemaphoreTake(g_lfs_mutex, portMAX_DELAY) == pdTRUE ? 0 : LFS_ERR_IO;
-    }
-    return 0;  /* No mutex created, assume single-threaded */
-}
-
-int lfs_port_unlock(const struct lfs_config *c)
-{
-    (void)c;
-    if (g_lfs_mutex != NULL) {
-        return xSemaphoreGive(g_lfs_mutex) == pdTRUE ? 0 : LFS_ERR_IO;
-    }
-    return 0;  /* No mutex created, assume single-threaded */
 }

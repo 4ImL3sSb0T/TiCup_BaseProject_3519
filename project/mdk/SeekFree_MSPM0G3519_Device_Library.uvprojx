@@ -338,7 +338,7 @@
             <v6Rtti>0</v6Rtti>
             <VariousControls>
               <MiscControls></MiscControls>
-              <Define>__MSPM0G3519__</Define>
+              <Define>__MSPM0G3519__,LFS_NO_MALLOC,LFS_NO_DEBUG,LFS_NO_WARN,LFS_NO_ERROR,LFS_NO_ASSERT</Define>
               <Undefine></Undefine>
               <IncludePath>..\..\libraries\sdk\third_party\CMSIS\Core\Include;..\..\libraries\sdk;..\..\libraries\sdk\ti_config;..\..\libraries\zf_common;..\..\libraries\zf_components;..\..\libraries\zf_device;..\..\libraries\zf_driver;..\user\inc;..\code</IncludePath>
             </VariousControls>
@@ -633,6 +633,51 @@
               <FileName>parser.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\service\com\parser.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_flash.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\bsp\flash\bsp_flash.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_flash.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\bsp\flash\bsp_flash.h</FilePath>
+            </File>
+            <File>
+              <FileName>lfs.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\service\lfs\lfs.c</FilePath>
+            </File>
+            <File>
+              <FileName>lfs.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\lfs\lfs.h</FilePath>
+            </File>
+            <File>
+              <FileName>lfs_util.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\service\lfs\lfs_util.c</FilePath>
+            </File>
+            <File>
+              <FileName>lfs_util.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\lfs\lfs_util.h</FilePath>
+            </File>
+            <File>
+              <FileName>lfs_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\service\lfs\lfs_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>lfs_port.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\lfs\lfs_port.h</FilePath>
+            </File>
+            <File>
+              <FileName>lfs_armclang_port.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\lfs\lfs_armclang_port.h</FilePath>
             </File>
           </Files>
         </Group>
