@@ -2,8 +2,8 @@
  * @file encoder.c
  * @brief 编码器模块实现（双编码器）
  *
- * 硬件：方向编码器模式 encoder_dir_init
- * 引脚：E2_02_encoder_dir_demo（TIM_G7 / TIM_G6）
+ * 硬件：正交编码器模式 encoder_quad_init
+ * 引脚：E2_01_encoder_quadrature_demo（TIM_G8 / TIM_G9）
  */
 #include "encoder.h"
 #include "common/filter/moving_average_filter.h"
@@ -11,15 +11,15 @@
 
 motor_encoder_t encoder_left = {
     .encoder_index = ENCODER_LEFT_TIMER,
-    .channel1 = ENCODER_LEFT_LSB,
-    .channel2 = ENCODER_LEFT_DIR,
+    .channel1 = ENCODER_LEFT_CH1,
+    .channel2 = ENCODER_LEFT_CH2,
     .polarity = 0
 };
 
 motor_encoder_t encoder_right = {
     .encoder_index = ENCODER_RIGHT_TIMER,
-    .channel1 = ENCODER_RIGHT_LSB,
-    .channel2 = ENCODER_RIGHT_DIR,
+    .channel1 = ENCODER_RIGHT_CH1,
+    .channel2 = ENCODER_RIGHT_CH2,
     .polarity = 1
 };
 
@@ -32,7 +32,7 @@ static motor_encoder_t *const encoder_list[] = {
 
 static void encoder_init_single(motor_encoder_t *encoder)
 {
-    encoder_dir_init(encoder->encoder_index, encoder->channel1, encoder->channel2);
+    encoder_quad_init(encoder->encoder_index, encoder->channel1, encoder->channel2);
     moving_average_filter_trim_init(&encoder->filter, encoder->filter_buffer,
                                     ENCODER_FILTER_WINDOW_SIZE, 1);
     encoder->raw_speed = 0;
@@ -44,7 +44,7 @@ void encoder_init(void)
 {
     uint8 i;
 
-    sys_log_text(info, "Encoder: init dual dir-encoder (G7/A26+B27, G6/B10+B11)...");
+    sys_log_text(info, "Encoder: init dual quad-encoder (G8/A26+A27, G9/B7+B9)...");
     for (i = 0; i < ENCODER_COUNT; i++) {
         encoder_init_single(encoder_list[i]);
     }

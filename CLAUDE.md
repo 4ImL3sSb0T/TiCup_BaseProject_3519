@@ -38,7 +38,7 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 | 功能 | 资源 |
 |------|------|
 | 电机 | TIM_A0 PWM + DIR GPIO |
-| 编码器 | TIM_G7 / TIM_G6 |
+| 编码器 | TIM_G8 / TIM_G9（正交 A26/A27、B7/B9） |
 | 1ms 节拍 | PIT_TIM_G12 |
 | 调试 | UART0 |
 | 命令 | UART3（A14/A13） |

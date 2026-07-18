@@ -3,7 +3,7 @@
  * @brief 双电机控制模块（DRV8701：DIR + PWM）
  *
  * 引脚：E3_04_drv8701e_double_motor_contro_demo
- * 编码器：E2_02_encoder_dir_demo
+ * 编码器：E2_01_encoder_quadrature_demo
  * 命令 mask: bit0=左电机, bit1=右电机
  */
 #include "motor.h"

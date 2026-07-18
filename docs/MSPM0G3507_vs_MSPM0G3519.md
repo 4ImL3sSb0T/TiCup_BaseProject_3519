@@ -83,7 +83,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 | 用途 | 使用的定时器 | 说明 |
 |------|--------------|------|
 | 电机 PWM | TIM_A0 | 两端一致 |
-| 左/右编码器 | TIM_G7 / TIM_G6 | 两端一致 |
+| 左/右编码器 | TIM_G8 / TIM_G9（正交） | 两端一致 |
 | 1ms 系统节拍 | **PIT_TIM_G12** | 3519 中 PIT 枚举含 G9/G12/G14，G12 下标为 7 |
 
 ---
@@ -149,8 +149,8 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 |------|------|
 | 电机左 | DIR=`A1`，PWM=`PWM_TIM_A0_CH0_A0` |
 | 电机右 | DIR=`B13`，PWM=`PWM_TIM_A0_CH2_B12` |
-| 编码器左 | TIM_G7，LSB=`A26`，DIR=`B27` |
-| 编码器右 | TIM_G6，LSB=`B10`，DIR=`B11` |
+| 编码器左 | TIM_G8，CH1=`A26`，CH2=`A27`（正交） |
+| 编码器右 | TIM_G9，CH1=`B7`，CH2=`B9`（正交） |
 | 系统 1ms | `PIT_TIM_G12` |
 | 调试串口 | UART0（A10/A11） |
 | 命令串口 | UART3（A14/A13） |
