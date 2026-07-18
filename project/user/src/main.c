@@ -21,26 +21,19 @@
 #include "service/sys/sys_time.h"
 #include "service/com/param.h"
 #include "service/com/cmd_service.h"
-#include "service/motion/motor.h"
-#include "service/motion/encoder.h"
-#include "service/motion/chassis.h"
 #include "service/imu/imu.h"
 
 /*
  * 硬件资源划分 —— 权威文档：docs/hardware.md（改脚前必读并回写）
- *   - 电机 PWM: TIM_A0 (A0/B12) + DIR GPIO (A1/B13)
- *   - 编码器:   TIM_G8 / TIM_G9（正交模式 A26/A27、B7/B9）
- *   - 1ms 节拍: PIT_TIM_G12  (不可用 A0；正交已占 G8/G9)
+ *   - 电机/编码器/底盘：暂关闭（B7 让给无线串口；WiFi SPI 暂不可用）
+ *   - 1ms 节拍: PIT_TIM_G12
  *   - 调试串口: UART0 (A10/A11)，兼命令入口
- *   - 核心板 LED: A14（E01_gpio_demo）
- *   - 命令入口: WiFi SPI + Debug UART0（UART3 暂禁用，避免抢 A13/A14）
- *   - 3519 无 UART2；同引脚场景可用 UART7 兼容
- *   - 日志: main 中 sys_log_init，可为 SYS_LOG_WIFI / SYS_LOG_UART
+ *   - 核心板 LED: A14
+ *   - 命令/日志: 无线转串口 UART1（B6 TX / B7 RX / B2 RTS）+ Debug UART0
+ *   - IMU: SPI1（B23/B22/B21 + CS B19）
  *
  * 多速率任务:
- *   - 1ms  soft: imu_update（匹配 Madgwick sampleFreq=1000）
- *   - 2ms  soft: encoder + motor
- *   - 10ms soft: chassis 外环
+ *   - 1ms  soft: imu_update
  *   - 20ms soft: 命令服务
  *   - 500ms soft: 核心板 LED 心跳（A14）
  */
@@ -48,8 +41,6 @@
 #define SYS_TICK_PIT            (PIT_TIM_G12)
 #define CMD_POLL_INTERVAL_MS    (20U)
 #define IMU_UPDATE_MS          (1U)
-#define MOTION_UPDATE_MS       (2U)
-#define CHASSIS_UPDATE_MS      (10U)
 #define LED_BLINK_INTERVAL_MS   (500U)
 #define LED_PIN                 (A14)
 
@@ -71,21 +62,6 @@ static void imu_task(const event_t *event, void *user_data)
     (void)event;
     (void)user_data;
     imu_update();
-}
-
-static void motion_task(const event_t *event, void *user_data)
-{
-    (void)event;
-    (void)user_data;
-    encoder_update();
-    motor_update();
-}
-
-static void chassis_task(const event_t *event, void *user_data)
-{
-    (void)event;
-    (void)user_data;
-    chassis_update();
 }
 
 /* 核心板蓝色 LED 心跳（E01_gpio_demo: A14 翻转） */
@@ -124,8 +100,8 @@ static void app_init(void)
     event_init();
     soft_timer_init();
 
-    /* 3. 日志（默认 UART；WiFi 模块就绪后可改为 SYS_LOG_WIFI） */
-    sys_log_init(SYS_LOG_WIFI);
+    /* 3. 日志：无线转串口（B6/B7）；失败回退 UART0 */
+    sys_log_init(SYS_LOG_WIRELESS);
     sys_log_text(info, "==== BaseProject_3519 boot ====");
 
     /* 4. 参数系统（Flash 持久化暂未启用） */
@@ -135,20 +111,20 @@ static void app_init(void)
         sys_log_text(info, "param_init ok");
     }
 
-    /* 5. 命令服务（WiFi + Debug UART0；UART3 暂禁用） */
+    /* 5. 命令服务（无线串口 + Debug UART0） */
     cmd_service_init();
-    sys_log_text(info, "cmd_service_init ok (wifi + debug UART0; UART3 off)");
+    sys_log_text(info, "cmd_service_init ok (wireless B6/B7 + debug UART0)");
 
-    /* 5b. 核心板 LED（A14，与 E01_gpio_demo 一致） */
+    /* 5b. 核心板 LED（A14） */
     gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
     sys_log_text(info, "LED heartbeat on A14");
 
-    /* 6. 双电机 + 双编码器（DRV8701） */
-    if (motor_init() != EXIT_OK) {
-        sys_log_text(error, "motor_init failed");
-    } else {
-        sys_log_text(info, "motor_init ok");
-    }
+    /*
+     * 6–8. 电机 / 编码器 / 底盘 —— 暂关闭
+     * 原因：右编码器 CH1 占用 B7，与无线串口 RX 冲突；WiFi SPI 当前不可用。
+     * 恢复时：改编码器脚或改通信脚，并同步 docs/hardware.md。
+     */
+    sys_log_text(info, "motor/encoder/chassis: DISABLED (B7 -> wireless RX)");
 
     /* 7. IMU（6 轴，无磁力计） */
     {
@@ -158,31 +134,21 @@ static void app_init(void)
         } else {
             sys_log_text(info, "imu_init ok (no_mag)");
         }
-
-        /* 8. 底盘服务（依赖 motor；IMU 可选） */
-        if (chassis_init() != EXIT_OK) {
-            sys_log_text(error, "chassis_init failed");
-        } else {
-            sys_log_text(info, "chassis_init ok");
-            chassis_set_imu_ready(imu_ret == EXIT_OK);
-        }
     }
 
-    /* 9. 1ms 系统节拍（PIT_G12，避开电机/编码器定时器） */
+    /* 9. 1ms 系统节拍 */
     pit_ms_init(SYS_TICK_PIT, 1, pit_1ms_callback, NULL);
     sys_log_text(info, "sys tick 1ms on PIT_G12");
 
-    /* 10. 周期任务 */
+    /* 10. 周期任务（无 motion / chassis） */
     (void)app_start_timer(CMD_POLL_INTERVAL_MS, cmd_service_task, "cmd");
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
-    (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
-    (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
     (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
     /* 11. 开全局中断 */
     interrupt_global_enable(0);
 
-    sys_log_text(info, "init done. LED blink 500ms. try: help / chassis status");
+    sys_log_text(info, "init done. LED 500ms. try: help (via wireless or UART0)");
 }
 
 int main(void)
@@ -190,7 +156,6 @@ int main(void)
     app_init();
 
     while (true) {
-        /* 软件定时器扫描 + 异步事件出队 */
         soft_timer_process();
         event_process_async();
     }

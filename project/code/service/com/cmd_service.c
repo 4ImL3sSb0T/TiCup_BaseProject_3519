@@ -1,7 +1,7 @@
 #include "cmd_service.h"
 #include "common/tools/common_def.h"
 #include "zf_common_fifo.h"
-#include "zf_device_wifi_spi.h"
+#include "zf_device_wireless_uart.h"
 #include "parse.h"
 #include "cmd_ack.h"
 #include "service/sys/sys_log.h"
@@ -10,20 +10,20 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CMD_SERVICE_RX_BUFFER_SIZE           256
-#define CMD_SERVICE_FIFO_BUFFER_SIZE_WIFI    256
-#define CMD_SERVICE_FIFO_BUFFER_SIZE_DEBUG   256
+#define CMD_SERVICE_RX_BUFFER_SIZE              256
+#define CMD_SERVICE_FIFO_BUFFER_SIZE_WIRELESS   256
+#define CMD_SERVICE_FIFO_BUFFER_SIZE_DEBUG      256
 
 /*
  * 命令入口（当前启用）：
- *   - WiFi SPI
+ *   - 无线转串口 UART1（B6 TX / B7 RX / B2 RTS）—— 与日志共用，由 sys_log_init 初始化
  *   - Debug UART0（A10/A11）
  *
- * UART3（A14/A13）暂不使用：避免与 LED(A14)、WiFi MISO(A13) 冲突。
- * 恢复时：恢复 UART3 通道 / uart_init / 中断回调，并同步 docs/hardware.md。
+ * WiFi SPI：暂不可用，不在此轮询。
+ * UART3（A14/A13）：暂禁用。
+ * 右编码器曾用 B7；当前底盘/电机/编码器关闭，B7 让给无线串口。
  */
 
-// 日志等级定义
 #define CMD_SERVICE_LOG_NONE   0
 #define CMD_SERVICE_LOG_ERROR  1
 #define CMD_SERVICE_LOG_INFO   2
@@ -45,7 +45,7 @@
 
 typedef enum
 {
-    CMD_SERVICE_SOURCE_WIFI = 0,
+    CMD_SERVICE_SOURCE_WIRELESS = 0,
     CMD_SERVICE_SOURCE_DEBUG,
     CMD_SERVICE_SOURCE_COUNT
 } cmd_service_source_t;
@@ -62,14 +62,14 @@ static u8 cmd_service_io_buffer[CMD_SERVICE_RX_BUFFER_SIZE];
 static u8 cmd_service_line_buffer[CMD_SERVICE_RX_BUFFER_SIZE];
 static u8 cmd_service_peek_buffer[CMD_SERVICE_RX_BUFFER_SIZE];
 
-static u8 cmd_service_wifi_fifo_buffer[CMD_SERVICE_FIFO_BUFFER_SIZE_WIFI];
+static u8 cmd_service_wireless_fifo_buffer[CMD_SERVICE_FIFO_BUFFER_SIZE_WIRELESS];
 static u8 cmd_service_debug_fifo_buffer[CMD_SERVICE_FIFO_BUFFER_SIZE_DEBUG];
 
 static cmd_service_rx_channel_t cmd_service_channels[CMD_SERVICE_SOURCE_COUNT] = {
     {
-        .buffer = cmd_service_wifi_fifo_buffer,
-        .buffer_size = CMD_SERVICE_FIFO_BUFFER_SIZE_WIFI,
-        .name = "wifi",
+        .buffer = cmd_service_wireless_fifo_buffer,
+        .buffer_size = CMD_SERVICE_FIFO_BUFFER_SIZE_WIRELESS,
+        .name = "wireless",
     },
     {
         .buffer = cmd_service_debug_fifo_buffer,
@@ -240,17 +240,23 @@ static void cmd_service_process_channel(cmd_service_rx_channel_t *channel)
 
 static void cmd_service_poll_sources(void)
 {
-    u32 wifi_bytes = wifi_spi_read_buffer(cmd_service_io_buffer, CMD_SERVICE_RX_BUFFER_SIZE);
-    if (wifi_bytes > 0) {
-        u32 pushed = cmd_service_fifo_push_buffer(&cmd_service_channels[CMD_SERVICE_SOURCE_WIFI], cmd_service_io_buffer, wifi_bytes);
-        if (pushed != wifi_bytes) {
-            CMD_LOG_ERROR("[wifi] FIFO full, dropped %u bytes", (wifi_bytes - pushed));
+    u32 wireless_bytes = wireless_uart_read_buffer(cmd_service_io_buffer, CMD_SERVICE_RX_BUFFER_SIZE);
+    if (wireless_bytes > 0) {
+        u32 pushed = cmd_service_fifo_push_buffer(
+            &cmd_service_channels[CMD_SERVICE_SOURCE_WIRELESS],
+            cmd_service_io_buffer,
+            wireless_bytes);
+        if (pushed != wireless_bytes) {
+            CMD_LOG_ERROR("[wireless] FIFO full, dropped %u bytes", (wireless_bytes - pushed));
         }
     }
 
     u32 debug_bytes = debug_read_ring_buffer(cmd_service_io_buffer, CMD_SERVICE_RX_BUFFER_SIZE);
     if (debug_bytes > 0) {
-        u32 pushed = cmd_service_fifo_push_buffer(&cmd_service_channels[CMD_SERVICE_SOURCE_DEBUG], cmd_service_io_buffer, debug_bytes);
+        u32 pushed = cmd_service_fifo_push_buffer(
+            &cmd_service_channels[CMD_SERVICE_SOURCE_DEBUG],
+            cmd_service_io_buffer,
+            debug_bytes);
         if (pushed != debug_bytes) {
             CMD_LOG_ERROR("[debug] FIFO full, dropped %u bytes", (debug_bytes - pushed));
         }
@@ -265,7 +271,7 @@ void cmd_service_init(void)
                   cmd_service_channels[i].buffer,
                   cmd_service_channels[i].buffer_size);
     }
-    /* UART3 未初始化，A13 留给 WiFi SPI MISO，A14 留给 LED */
+    /* 无线串口由 sys_log_init(SYS_LOG_WIRELESS) 初始化，此处只建接收 FIFO */
 }
 
 void cmd_service_task(const event_t *event, void *user_data)

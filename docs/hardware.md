@@ -24,9 +24,11 @@
 | 电机 | `project/code/service/motion/motor.h` |
 | 编码器 | `project/code/service/motion/encoder.h` |
 | 命令串口 | `project/code/service/com/cmd_service.c` |
+| 日志通道 | `project/code/service/sys/sys_log.c` / `sys_log.h` |
+| 无线转串口 | `libraries/zf_device/zf_device_wireless_uart.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
 | IMU963RA | `libraries/zf_device/zf_device_imu963ra.h` |
-| WiFi SPI | `libraries/zf_device/zf_device_wifi_spi.h` |
+| WiFi SPI | `libraries/zf_device/zf_device_wifi_spi.h`（**当前未用**） |
 | 屏 IPS200/114 | `libraries/zf_device/zf_device_ips200.h` 等 |
 
 ---
@@ -35,17 +37,19 @@
 
 | 功能 | 外设 / 定时器 | 引脚 | 说明 | 官方例程参考 |
 |------|---------------|------|------|--------------|
-| 左电机 PWM | TIM_A0 CH0 | **A0** | DRV8701 | E3_04_drv8701e_double |
-| 左电机 DIR | GPIO | **A1** | | 同上 |
-| 右电机 PWM | TIM_A0 CH2 | **B12** | | 同上 |
-| 右电机 DIR | GPIO | **B13** | | 同上 |
-| 左编码器 A/B | TIM_G8 正交 | **A26 / A27** | `encoder_quad_init` | E2_01_encoder_quadrature |
-| 右编码器 A/B | TIM_G9 正交 | **B7 / B9** | 仅 G8/G9 支持正交 | 同上 |
+| ~~左电机 PWM~~ | TIM_A0 CH0 | ~~A0~~ | **暂关闭** | E3_04_drv8701e_double |
+| ~~左电机 DIR~~ | GPIO | ~~A1~~ | **暂关闭** | 同上 |
+| ~~右电机 PWM~~ | TIM_A0 CH2 | ~~B12~~ | **暂关闭** | 同上 |
+| ~~右电机 DIR~~ | GPIO | ~~B13~~ | **暂关闭** | 同上 |
+| ~~左编码器 A/B~~ | TIM_G8 正交 | ~~A26 / A27~~ | **暂关闭** | E2_01_encoder_quadrature |
+| ~~右编码器 A/B~~ | TIM_G9 正交 | ~~B7 / B9~~ | **暂关闭**（B7 让给无线 RX） | 同上 |
+| ~~底盘~~ | software | — | **暂关闭**（`main` 不 init / 不轮询） | — |
 | 系统 1ms 节拍 | PIT_TIM_G12 | —（无 GPIO） | `sys_time_ms` | — |
-| 调试串口 | UART0 | **A10 TX / A11 RX** | 115200 | 核心板 debug |
+| 调试串口 | UART0 | **A10 TX / A11 RX** | 115200；兼命令入口 | 核心板 debug |
 | 核心板蓝灯 | GPIO | **A14** | 500ms soft_timer 翻转 | E01_gpio_demo |
-| 命令入口 | WiFi SPI + UART0 | 见 §5 | **UART3 暂禁用**（避免 A13/A14 冲突） | — |
-| 日志默认 | WiFi SPI 或 UART | 见 §5 | `sys_log_init(SYS_LOG_WIFI)` | — |
+| 命令 + 日志 | UART1 无线转串口 | **B6 TX / B7 RX / B2 RTS** | `SYS_LOG_WIRELESS`；ISR 走 `wireless_module_uart_handler` | 无线串口例程 |
+| 命令辅入口 | UART0 | A10/A11 | `debug_read_ring_buffer` | — |
+| ~~命令/日志 WiFi SPI~~ | SPI0 | — | **暂不可用**，勿接线依赖 | — |
 | IMU | SPI1 | B23/B22/B21 + CS B19 | IMU963RA 默认 SPI | E4_03_imu963ra |
 
 电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`。
@@ -56,10 +60,11 @@
 
 | 定时器 | 用途 | 可否再占用 |
 |--------|------|------------|
-| **TIM_A0** | 双电机 PWM | 否（CH0/CH2 已用） |
-| **TIM_G8** | 左正交编码器 | 否 |
-| **TIM_G9** | 右正交编码器 | 否 |
+| TIM_A0 | 双电机 PWM（**固件暂未 init**） | 可临时挪用；恢复电机后否 |
+| TIM_G8 | 左正交编码器（**暂未 init**） | 可临时挪用；恢复编码器后否 |
+| TIM_G9 | 右正交编码器（**暂未 init**） | 可临时挪用；恢复编码器后否 |
 | **PIT_TIM_G12** | 系统 1ms | 否 |
+| **UART1** | 无线转串口（命令/日志） | 否 |
 | TIM_G6 / TIM_G7 | 方向编码器例程用，**本工程正交模式未用** | 可规划，勿与其它冲突 |
 | TIM_A1、TIM_G0、TIM_G14 等 | 未占用 | 新功能优先从这里选 |
 
@@ -85,23 +90,26 @@
 
 | 引脚 | 功能 |
 |------|------|
-| A0 | 左电机 PWM |
-| A1 | 左电机 DIR |
-| A10 | UART0 TX（调试） |
-| A11 | UART0 RX（调试） |
+| A10 | UART0 TX（调试 + 命令辅入口） |
+| A11 | UART0 RX（调试 + 命令辅入口） |
 | A14 | **核心板 LED**（心跳） |
-| A13 | WiFi SPI MISO（屏 BL 启用时亦可能占用，见 §5–6） |
-| A26 | 左编码器 CH1 |
-| A27 | 左编码器 CH2 |
-| B7 | 右编码器 CH1 |
-| B9 | 右编码器 CH2 |
-| B12 | 右电机 PWM |
-| B13 | 右电机 DIR |
+| **B6** | **无线串口 MCU TX**（UART1） |
+| **B7** | **无线串口 MCU RX**（UART1） |
+| **B2** | **无线串口 RTS** |
 | B19 | IMU CS |
 | B21 | IMU SPI1 MISO |
 | B22 | IMU SPI1 MOSI |
 | B23 | IMU SPI1 SCK |
-| A9 / A12 / A16 / A17 / B20 等 | WiFi SPI 默认脚（启用日志 WiFi 时占用） |
+
+### 3.1b 暂释放（代码保留宏，main 未 init）
+
+| 引脚 | 原功能 | 说明 |
+|------|--------|------|
+| A0 / A1 | 左电机 PWM/DIR | 底盘关闭期间未驱动 |
+| B12 / B13 | 右电机 PWM/DIR | 同上 |
+| A26 / A27 | 左编码器 | 同上 |
+| B9 | 右编码器 CH2 | 右 CH1 曾为 B7，与无线 RX 冲突 |
+| A9 / A12 / A13 / A16 / A17 / B20 | WiFi SPI | **模块暂不可用** |
 
 ### 3.2 核心板 / 主板「尽量不要用」
 
@@ -116,9 +124,11 @@
 
 | 冲突 | 引脚 | 现状与策略 |
 |------|------|------------|
-| **UART3 暂禁用** | A14/A13 | 原命令串口 UART3（TX A14 / RX A13）已关闭，释放给 **LED + WiFi MISO**。恢复时需改 `cmd_service.c` 并评估与 LED/WiFi 的互斥。 |
-| **右电机 DIR vs GUI 按键例程** | B13 | `mjc_input_button.c` 示例用 B13 等，与右电机 DIR **冲突**。启用屏按键前必须改脚并更新本文。 |
-| **SPI0 总线** | A9/A12/A13… | WiFi SPI 与 IPS 屏常共用 SPI0 不同 CS，同时启用前查库头文件。 |
+| **无线 RX vs 右编码器 CH1** | **B7** | **当前优先无线串口**；电机/编码器/底盘在 `main` 中关闭。恢复底盘须先改编码器脚（勿再用 B7）或改通信脚。 |
+| **UART3 暂禁用** | A14/A13 | 原命令串口 UART3 已关闭；A14 给 LED。 |
+| **WiFi SPI 暂不可用** | SPI0 组 | 命令/日志已改无线 UART；勿再依赖 `SYS_LOG_WIFI` / `wifi_spi_read_buffer`。 |
+| **右电机 DIR vs GUI 按键例程** | B13 | 恢复电机后与 `mjc_input_button` 示例冲突，启用屏按键前改脚。 |
+| **SPI0 总线** | A9/A12/A13… | WiFi SPI 与 IPS 屏常共用 SPI0 不同 CS。 |
 | **3519 无 UART2** | — | 原 3507 的 UART2 场景改 **UART7** 或其它实例。 |
 
 ---
@@ -148,8 +158,9 @@
 
 ### 4.3 底盘
 
+- **当前固件：底盘关闭**（`chassis_init` / `chassis_update` 未调用）。
 - 差速：`chassis` 依赖 motor + encoder；IMU 可选（航向/角速度闭环）。
-- 改轮距、减速比等运动学参数在 `chassis` 相关头文件，**不改引脚**；若改了传感器接线仍须更新本文件。
+- 恢复步骤：改编码器脚避开 B6/B7/B2 → 恢复 `motor_init` / `chassis_init` 与 soft_timer → 回写本文。
 
 ---
 
@@ -157,12 +168,20 @@
 
 | 通道 | 外设 | 引脚 | 波特率 / 速率 | 用途 |
 |------|------|------|---------------|------|
-| 调试 + 命令 | UART0 | A10/A11 | 115200 | `debug_init` / printf / `cmd_service` |
-| 命令 WiFi | SPI0 + 控制脚 | 同日志 WiFi | 30 MHz SPI | `cmd_service` 读 WiFi 缓冲 |
-| ~~命令 UART3~~ | ~~UART3~~ | ~~A14/A13~~ | — | **暂禁用**，勿接线依赖 |
-| 日志 WiFi | SPI0 + 控制脚 | SCK A12, MOSI A9, MISO A13, CS B20, INT A17, RST A16 | 30 MHz SPI | `sys_log` / `WIFI_SPI_*` |
+| **命令 + 日志（主）** | **UART1 无线转串口** | **B6 TX / B7 RX / B2 RTS** | 115200 | `sys_log_init(SYS_LOG_WIRELESS)` + `wireless_uart_read_buffer` |
+| 调试 + 命令（辅） | UART0 | A10/A11 | 115200 | `debug_init` / printf / `cmd_service` |
+| ~~命令/日志 WiFi SPI~~ | SPI0 | A12/A9/A13/B20/A17/A16 | — | **暂不可用** |
+| ~~命令 UART3~~ | ~~UART3~~ | ~~A14/A13~~ | — | **暂禁用** |
 
-日志类型：`SYS_LOG_UART` / `SYS_LOG_WIFI`（见 `sys_log.h`）。当前 `main` 使用 `sys_log_init(SYS_LOG_WIFI)` 时需接 WiFi SPI 模块。
+日志类型（`sys_log.h`）：
+
+| 枚举 | 后端 |
+|------|------|
+| `SYS_LOG_WIRELESS` | `wireless_uart_*`（**当前默认**） |
+| `SYS_LOG_UART` | Debug UART0 |
+| `SYS_LOG_WIFI` | WiFi SPI（保留，硬件可用后再开） |
+
+无线脚在 `zf_device_wireless_uart.h`：`WIRELESS_UART_RX_PIN=UART1_TX_B6`，`WIRELESS_UART_TX_PIN=UART1_RX_B7`（命名：宏指「接模块 TX/RX 的 MCU 侧」）。
 
 ---
 
@@ -198,8 +217,8 @@
 | 周期 | 任务 |
 |------|------|
 | 1 ms | `imu_update` |
-| 2 ms | `encoder_update` + `motor_update` |
-| 10 ms | `chassis_update` |
+| ~~2 ms~~ | ~~`encoder_update` + `motor_update`~~（底盘关闭） |
+| ~~10 ms~~ | ~~`chassis_update`~~（底盘关闭） |
 | 20 ms | `cmd_service_task` |
 | 500 ms | LED 心跳 `gpio_toggle_level(A14)` |
 
@@ -227,6 +246,7 @@
 |------|------|
 | 2026-07-18 | 初版：汇总电机/正交编码器/PIT/UART/LED/IMU/WiFi 及冲突策略 |
 | 2026-07-18 | 编码器由方向模式(G6/G7)改为正交(G8/G9, A26/A27, B7/B9) |
+| 2026-07-18 | 命令/日志改无线串口 B6/B7/B2；WiFi SPI 停用；电机/编码器/底盘暂关（B7 冲突） |
 | 2026-07-18 | 增加 A14 LED soft_timer 心跳（优先于 UART3_TX） |
 | 2026-07-18 | 禁用命令 UART3；命令仅 WiFi SPI + Debug UART0；A13 专供 WiFi MISO |
 

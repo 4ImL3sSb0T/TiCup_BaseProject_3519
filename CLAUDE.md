@@ -41,12 +41,12 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 
 | 功能 | 资源 |
 |------|------|
-| 电机 | TIM_A0：左 A0/A1，右 B12/B13 |
-| 编码器 | TIM_G8/G9 正交：A26/A27、B7/B9 |
+| 电机/编码器/底盘 | **暂关闭**（B7 让给无线串口） |
 | 1ms 节拍 | PIT_TIM_G12 |
 | LED | A14（500ms 心跳） |
 | 调试 | UART0（A10/A11） |
-| 命令 | WiFi SPI + UART0（UART3 暂禁用） |
+| 命令/日志 | **无线串口 UART1：B6 TX / B7 RX / B2 RTS** + UART0（WiFi SPI 暂不可用） |
+| IMU | SPI1：B23/B22/B21 + CS B19 |
 
 ## 3519 注意
 

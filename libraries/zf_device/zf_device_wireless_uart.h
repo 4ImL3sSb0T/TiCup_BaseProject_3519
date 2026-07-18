@@ -52,8 +52,9 @@
 //================================================定义 无线串口 基本配置===================================================
 #define WIRELESS_UART_INDEX         (UART_1		   )                    // 无线串口对应使用的串口号
 #define WIRELESS_UART_BUAD_RATE     (115200		   )                    // 无线串口对应使用的串口波特率
-#define WIRELESS_UART_TX_PIN        (UART1_RX_B5   )                    // 无线串口对应模块的 TX 要接到单片机的 RX
-#define WIRELESS_UART_RX_PIN        (UART1_TX_B6   )                    // 无线串口对应模块的 RX 要接到单片机的 TX
+/* 主板无线座：MCU TX=B6 / RX=B7 / RTS=B2（与库默认 B5/B6 不同，按主板丝印） */
+#define WIRELESS_UART_TX_PIN        (UART1_RX_B7   )                    // 模块 TX → 单片机 RX = B7
+#define WIRELESS_UART_RX_PIN        (UART1_TX_B6   )                    // 模块 RX → 单片机 TX = B6
 #define WIRELESS_UART_RTS_PIN       (B2		       )                    // 无线串口对应模块的 RTS 引脚
 //====================================================自动波特率====================================================
 // 注意事项1：无线转串口模块版本是V2.0以下的是无法开启自动波特率的。
@@ -79,7 +80,7 @@ typedef enum
 }wireless_uart_auto_baudrate_state_enum;
 #endif
 
-#define WIRELESS_UART_BUFFER_SIZE       ( 64   )
+#define WIRELESS_UART_BUFFER_SIZE       ( 256  )  /* 作命令/日志主通道时加大，避免 20ms 轮询丢字节 */
 #define WIRELESS_UART_TIMEOUT_COUNT     ( 0x64 )
 //================================================定义 无线串口 基本配置===================================================
 
