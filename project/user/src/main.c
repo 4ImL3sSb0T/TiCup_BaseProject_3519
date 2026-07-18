@@ -32,7 +32,8 @@
  *   - 编码器:   TIM_G8 / TIM_G9（正交模式 A26/A27、B7/B9）
  *   - 1ms 节拍: PIT_TIM_G12  (不可用 A0；正交已占 G8/G9)
  *   - 调试串口: UART0 (A10/A11)
- *   - 命令串口: UART3 (A14/A13)  // 注意 A14 也是核心板 LED，尽量保留
+ *   - 核心板 LED: A14（E01_gpio_demo，与 UART3_TX 冲突，心跳优先占 A14）
+ *   - 命令串口: UART3 (A14/A13)  // LED 启用时 TX 不可用，改用 debug UART / WiFi
  *   - 3519 无 UART2；同引脚场景可用 UART7 兼容
  *   - 日志默认: 调试串口 (SYS_LOG_UART)；有 WiFi SPI 模块可改 SYS_LOG_WIFI
  *
@@ -41,6 +42,7 @@
  *   - 2ms  soft: encoder + motor
  *   - 10ms soft: chassis 外环
  *   - 20ms soft: 命令服务
+ *   - 500ms soft: 核心板 LED 心跳（A14）
  */
 
 #define SYS_TICK_PIT            (PIT_TIM_G12)
@@ -48,6 +50,8 @@
 #define IMU_UPDATE_MS          (1U)
 #define MOTION_UPDATE_MS       (2U)
 #define CHASSIS_UPDATE_MS      (10U)
+#define LED_BLINK_INTERVAL_MS   (500U)
+#define LED_PIN                 (A14)
 
 /* -------------------------------------------------------------------------- */
 /* 1ms 硬件定时：仅推进系统时间（不跑重逻辑）                                    */
@@ -82,6 +86,14 @@ static void chassis_task(const event_t *event, void *user_data)
     (void)event;
     (void)user_data;
     chassis_update();
+}
+
+/* 核心板蓝色 LED 心跳（E01_gpio_demo: A14 翻转） */
+static void led_blink_task(const event_t *event, void *user_data)
+{
+    (void)event;
+    (void)user_data;
+    gpio_toggle_level(LED_PIN);
 }
 
 static soft_timer_id_t app_start_timer(uint32_t period_ms,
@@ -127,6 +139,10 @@ static void app_init(void)
     cmd_service_init();
     sys_log_text(info, "cmd_service_init ok (UART3 A14/A13, debug UART0)");
 
+    /* 5b. 核心板 LED（A14，覆盖 UART3_TX 复用，与 E01_gpio_demo 一致） */
+    gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
+    sys_log_text(info, "LED heartbeat on A14 (UART3_TX released)");
+
     /* 6. 双电机 + 双编码器（DRV8701） */
     if (motor_init() != EXIT_OK) {
         sys_log_text(error, "motor_init failed");
@@ -161,11 +177,12 @@ static void app_init(void)
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
+    (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
     /* 11. 开全局中断 */
     interrupt_global_enable(0);
 
-    sys_log_text(info, "init done. try: help / chassis status / motor 0x3 status");
+    sys_log_text(info, "init done. LED blink 500ms. try: help / chassis status");
 }
 
 int main(void)
