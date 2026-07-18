@@ -27,7 +27,7 @@
 #include "service/imu/imu.h"
 
 /*
- * 硬件资源划分（避免冲突）:
+ * 硬件资源划分 —— 权威文档：docs/hardware.md（改脚前必读并回写）
  *   - 电机 PWM: TIM_A0 (A0/B12) + DIR GPIO (A1/B13)
  *   - 编码器:   TIM_G8 / TIM_G9（正交模式 A26/A27、B7/B9）
  *   - 1ms 节拍: PIT_TIM_G12  (不可用 A0；正交已占 G8/G9)
