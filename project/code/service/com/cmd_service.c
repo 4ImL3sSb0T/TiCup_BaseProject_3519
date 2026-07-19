@@ -16,13 +16,19 @@
 
 /*
  * 命令入口（当前启用）：
- *   - 无线转串口 UART1（B6 TX / B7 RX / B2 RTS）—— 与日志共用，由 sys_log_init 初始化
- *   - Debug UART0（A10/A11）
+ *   - Debug UART0（A10/A11）—— 主通道
  *
- * WiFi SPI：暂不可用，不在此轮询。
+ * 无线转串口 UART1（B6/B7/B2）：暂关闭（B7 给右编码器 TIM_G9 CH1）。
+ *   恢复时：改 CMD_SERVICE_ENABLE_WIRELESS=1，且 sys_log_init(SYS_LOG_WIRELESS)，
+ *   同时改右编码器脚或关闭底盘。
+ * WiFi SPI：暂不可用。
  * UART3（A14/A13）：暂禁用。
- * 右编码器曾用 B7；当前底盘/电机/编码器关闭，B7 让给无线串口。
  */
+
+/* 0=不轮询/不依赖无线串口（当前）；1=与 sys_log WIRELESS 联用 */
+#ifndef CMD_SERVICE_ENABLE_WIRELESS
+#define CMD_SERVICE_ENABLE_WIRELESS  0
+#endif
 
 #define CMD_SERVICE_LOG_NONE   0
 #define CMD_SERVICE_LOG_ERROR  1
@@ -240,6 +246,7 @@ static void cmd_service_process_channel(cmd_service_rx_channel_t *channel)
 
 static void cmd_service_poll_sources(void)
 {
+#if CMD_SERVICE_ENABLE_WIRELESS
     u32 wireless_bytes = wireless_uart_read_buffer(cmd_service_io_buffer, CMD_SERVICE_RX_BUFFER_SIZE);
     if (wireless_bytes > 0) {
         u32 pushed = cmd_service_fifo_push_buffer(
@@ -250,6 +257,7 @@ static void cmd_service_poll_sources(void)
             CMD_LOG_ERROR("[wireless] FIFO full, dropped %u bytes", (wireless_bytes - pushed));
         }
     }
+#endif
 
     u32 debug_bytes = debug_read_ring_buffer(cmd_service_io_buffer, CMD_SERVICE_RX_BUFFER_SIZE);
     if (debug_bytes > 0) {
@@ -265,13 +273,17 @@ static void cmd_service_poll_sources(void)
 
 void cmd_service_init(void)
 {
-    for (u32 i = 0; i < CMD_SERVICE_SOURCE_COUNT; i++) {
-        fifo_init(&cmd_service_channels[i].fifo,
-                  FIFO_DATA_8BIT,
-                  cmd_service_channels[i].buffer,
-                  cmd_service_channels[i].buffer_size);
-    }
-    /* 无线串口由 sys_log_init(SYS_LOG_WIRELESS) 初始化，此处只建接收 FIFO */
+#if CMD_SERVICE_ENABLE_WIRELESS
+    fifo_init(&cmd_service_channels[CMD_SERVICE_SOURCE_WIRELESS].fifo,
+              FIFO_DATA_8BIT,
+              cmd_service_channels[CMD_SERVICE_SOURCE_WIRELESS].buffer,
+              cmd_service_channels[CMD_SERVICE_SOURCE_WIRELESS].buffer_size);
+#endif
+    fifo_init(&cmd_service_channels[CMD_SERVICE_SOURCE_DEBUG].fifo,
+              FIFO_DATA_8BIT,
+              cmd_service_channels[CMD_SERVICE_SOURCE_DEBUG].buffer,
+              cmd_service_channels[CMD_SERVICE_SOURCE_DEBUG].buffer_size);
+    /* 无线由 sys_log_init(SYS_LOG_WIRELESS) 初始化；当前默认不启用 */
 }
 
 void cmd_service_task(const event_t *event, void *user_data)
@@ -281,7 +293,8 @@ void cmd_service_task(const event_t *event, void *user_data)
 
     cmd_service_poll_sources();
 
-    for (u32 i = 0; i < CMD_SERVICE_SOURCE_COUNT; i++) {
-        cmd_service_process_channel(&cmd_service_channels[i]);
-    }
+#if CMD_SERVICE_ENABLE_WIRELESS
+    cmd_service_process_channel(&cmd_service_channels[CMD_SERVICE_SOURCE_WIRELESS]);
+#endif
+    cmd_service_process_channel(&cmd_service_channels[CMD_SERVICE_SOURCE_DEBUG]);
 }

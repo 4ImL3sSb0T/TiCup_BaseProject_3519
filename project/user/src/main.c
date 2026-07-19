@@ -22,19 +22,25 @@
 #include "service/fs/fs_service.h"
 #include "service/com/param.h"
 #include "service/com/cmd_service.h"
+#include "service/motion/motor.h"
+#include "service/motion/encoder.h"
+#include "service/motion/chassis.h"
 #include "service/imu/imu.h"
 
 /*
  * 硬件资源划分 —— 权威文档：docs/hardware.md（改脚前必读并回写）
- *   - 电机/编码器/底盘：暂关闭（B7 让给无线串口；WiFi SPI 暂不可用）
+ *   - 电机 PWM: TIM_A0 (A0/B12) + DIR GPIO (A1/B13)
+ *   - 编码器: TIM_G8 / TIM_G9 正交（A26/A27、B7/B9）
  *   - 1ms 节拍: PIT_TIM_G12
- *   - 调试串口: UART0 (A10/A11)，兼命令入口
+ *   - 调试串口 + 命令/日志: UART0 (A10/A11) —— 当前主通道
+ *   - 无线转串口 UART1（B6/B7/B2）: 暂关闭（B7 给右编码器）
  *   - 核心板 LED: A14
- *   - 命令/日志: 无线转串口 UART1（B6 TX / B7 RX / B2 RTS）+ Debug UART0
  *   - IMU: SPI1（B23/B22/B21 + CS B19）
  *
  * 多速率任务:
  *   - 1ms  soft: imu_update
+ *   - 2ms  soft: encoder + motor
+ *   - 10ms soft: chassis 外环
  *   - 20ms soft: 命令服务
  *   - 500ms soft: 核心板 LED 心跳（A14）
  */
@@ -42,6 +48,8 @@
 #define SYS_TICK_PIT            (PIT_TIM_G12)
 #define CMD_POLL_INTERVAL_MS    (20U)
 #define IMU_UPDATE_MS          (1U)
+#define MOTION_UPDATE_MS       (2U)
+#define CHASSIS_UPDATE_MS      (10U)
 #define LED_BLINK_INTERVAL_MS   (500U)
 #define LED_PIN                 (A14)
 
@@ -63,6 +71,21 @@ static void imu_task(const event_t *event, void *user_data)
     (void)event;
     (void)user_data;
     imu_update();
+}
+
+static void motion_task(const event_t *event, void *user_data)
+{
+    (void)event;
+    (void)user_data;
+    encoder_update();
+    motor_update();
+}
+
+static void chassis_task(const event_t *event, void *user_data)
+{
+    (void)event;
+    (void)user_data;
+    chassis_update();
 }
 
 /* 核心板蓝色 LED 心跳（E01_gpio_demo: A14 翻转） */
@@ -94,27 +117,28 @@ static void app_init(void)
 {
     /*
      * 初始化顺序（按依赖）：
-     *   clock/debug/dwt → log → event → soft_timer → 业务
+     *   clock/debug/dwt → log → event → soft_timer → fs → param → cmd
+     *   → motor(+encoder) → imu → chassis → param_load → 节拍与周期任务
      *
-     * 关键：
-     *   - event_init() 内会调 sys_log_text；log 未 init 时默认 SYS_LOG_WIRELESS，
-     *     会写未初始化的 wireless_uart。
-     *   - soft_timer 创建/启动依赖 event（subscribe/publish）。
-     *   - cmd_service 假定无线串口已由 sys_log_init 初始化。
+     * 注意：
+     *   - event_init() 内会调 sys_log_text；log 须先 init。
+     *   - soft_timer 创建/启动依赖 event。
+     *   - 当前 SYS_LOG_UART：不 init 无线，B7 留给右编码器。
+     *   - param_load 须在全部 param_add（motor/chassis）之后。
      */
-    /* 1. 基础时钟 / 调试串口 / 周期计数（log 失败回退 UART0 依赖 debug_init） */
+    /* 1. 基础时钟 / 调试串口 / 周期计数 */
     clock_init(SYSTEM_CLOCK_80M);
     debug_init();
     dwt_init();
 
-    /* 2. 日志最先就绪：无线转串口（B6/B7）；失败回退 UART0 */
+    /* 2. 日志：Debug UART0（无线暂关） */
     sys_log_init(SYS_LOG_UART);
     sys_log_text(info, "==== BaseProject_3519 boot ====");
 
-    /* 3. 事件系统（init 路径会打日志） */
+    /* 3. 事件系统 */
     event_init();
 
-    /* 4. 软件定时器（依赖 event） */
+    /* 4. 软件定时器 */
     soft_timer_init();
 
     /* 5. LittleFS（DATA Flash）— 须在 param 持久化之前 */
@@ -131,22 +155,22 @@ static void app_init(void)
         sys_log_text(info, "param_init ok");
     }
 
-    /* 7. 命令服务（无线串口 + Debug UART0；无线由 log 已 init） */
+    /* 7. 命令服务（仅 Debug UART0；无线暂关） */
     cmd_service_init();
-    sys_log_text(info, "cmd_service_init ok (wireless B6/B7 + debug UART0)");
+    sys_log_text(info, "cmd_service_init ok (debug UART0 only, wireless off)");
 
     /* 8. 核心板 LED（A14） */
     gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
     sys_log_text(info, "LED heartbeat on A14");
 
-    /*
-     * 电机 / 编码器 / 底盘 —— 暂关闭
-     * 原因：右编码器 CH1 占用 B7，与无线串口 RX 冲突；WiFi SPI 当前不可用。
-     * 恢复时：改编码器脚或改通信脚，并同步 docs/hardware.md；init 内会 param_add。
-     */
-    sys_log_text(info, "motor/encoder/chassis: DISABLED (B7 -> wireless RX)");
+    /* 9. 双电机 + 双编码器（DRV8701 + 正交；右编码器 B7/B9） */
+    if (motor_init() != EXIT_OK) {
+        sys_log_text(error, "motor_init failed");
+    } else {
+        sys_log_text(info, "motor_init ok");
+    }
 
-    /* 9. IMU（6 轴，无磁力计；init 路径会打日志） */
+    /* 10. IMU（6 轴，无磁力计） */
     {
         exit_code_t imu_ret = imu_init(imu_mode_no_mag);
         if (imu_ret != EXIT_OK) {
@@ -154,26 +178,36 @@ static void app_init(void)
         } else {
             sys_log_text(info, "imu_init ok (no_mag)");
         }
+
+        /* 11. 底盘（依赖 motor；IMU 可选闭环） */
+        if (chassis_init() != EXIT_OK) {
+            sys_log_text(error, "chassis_init failed");
+        } else {
+            sys_log_text(info, "chassis_init ok");
+            chassis_set_imu_ready(imu_ret == EXIT_OK);
+        }
     }
 
-    /* 10. 全部 param_add 完成后从 LFS /param.txt 恢复（无文件则用默认） */
+    /* 12. 全部 param_add 完成后从 LFS /param.txt 恢复 */
     if (param_load("boot") != 0) {
         sys_log_text(warning, "param_load boot failed (using defaults)");
     }
 
-    /* 11. 1ms 系统节拍（驱动 soft_timer 的 sys_time_ms） */
+    /* 13. 1ms 系统节拍 */
     pit_ms_init(SYS_TICK_PIT, 1, pit_1ms_callback, NULL);
     sys_log_text(info, "sys tick 1ms on PIT_G12");
 
-    /* 12. 周期任务（依赖 soft_timer + event） */
+    /* 14. 周期任务 */
     (void)app_start_timer(CMD_POLL_INTERVAL_MS, cmd_service_task, "cmd");
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
+    (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
+    (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
     (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
-    /* 13. 开全局中断 */
+    /* 15. 开全局中断 */
     interrupt_global_enable(0);
 
-    sys_log_text(info, "init done. LED 500ms. try: help / show / export / save (wireless or UART0)");
+    sys_log_text(info, "init done. try: help / chassis status / motor (UART0)");
 }
 
 int main(void)

@@ -31,9 +31,9 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 ### Boot flow
 
 1. `clock_init(SYSTEM_CLOCK_80M)` + `debug_init()`
-2. event / soft_timer / log / **fs_init (LFS)** / param_init / cmd / (motor 暂关) / imu / **param_load**
+2. event / soft_timer / log(UART0) / **fs_init (LFS)** / param_init / cmd / **motor+encoder** / imu / **chassis** / **param_load**
 3. `pit_ms_init(PIT_TIM_G12, 1, ...)` 系统 1ms
-4. soft_timer 周期任务 + `event_process_async()` 主循环
+4. soft_timer：imu 1ms / motion 2ms / chassis 10ms / cmd 20ms / LED 500ms + `event_process_async()` 主循环
 
 ### Hardware (current)
 
@@ -41,11 +41,10 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 
 | 功能 | 资源 |
 |------|------|
-| 电机/编码器/底盘 | **暂关闭**（B7 让给无线串口） |
+| 电机/编码器/底盘 | **已启用**（右编码器 B7/B9；无线暂关） |
 | 1ms 节拍 | PIT_TIM_G12 |
 | LED | A14（500ms 心跳） |
-| 调试 | UART0（A10/A11） |
-| 命令/日志 | **无线串口 UART1：B6 TX / B7 RX / B2 RTS** + UART0（WiFi SPI 暂不可用） |
+| 命令/日志 | **UART0（A10/A11）**；无线 UART1 暂关；WiFi SPI 暂不可用 |
 | IMU | SPI1：B23/B22/B21 + CS B19 |
 | 参数持久化 | LittleFS `/param.txt`（key=value），DATA Flash via `bsp_flash`（非 MAIN `storage`） |
 
