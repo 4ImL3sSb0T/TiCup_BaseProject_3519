@@ -107,7 +107,7 @@ static void app_init(void)
     dwt_init();
 
     /* 2. 日志最先就绪：无线转串口（B6/B7）；失败回退 UART0 */
-    sys_log_init(SYS_LOG_WIRELESS);
+    sys_log_init(SYS_LOG_UART);
     sys_log_text(info, "==== BaseProject_3519 boot ====");
 
     /* 3. 事件系统（init 路径会打日志） */
