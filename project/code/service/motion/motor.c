@@ -23,6 +23,32 @@
 static float motor_speed_pid_kp = 120.0f;
 static float motor_speed_pid_ki = 200.0f;
 
+/*
+ * 纸飞机 TEXT 协议：{window}num,num\n → 分窗绘图
+ * 控制 2ms 一拍，分频后约 50Hz，避免 115200 堵口。
+ * 格式：{motor_l}<目标>,<实测>
+ */
+#ifndef MOTOR_L_PLOT_ENABLE
+#define MOTOR_L_PLOT_ENABLE     1
+#endif
+#ifndef MOTOR_L_PLOT_DIV
+#define MOTOR_L_PLOT_DIV        10U   /* 2ms * 10 = 20ms */
+#endif
+
+#if MOTOR_L_PLOT_ENABLE
+static void motor_plot_left(float target, float measured)
+{
+    static uint8_t s_div;
+
+    if (++s_div < MOTOR_L_PLOT_DIV) {
+        return;
+    }
+    s_div = 0U;
+    /* 逗号分隔数字：纸飞机按 window 分窗并绘图 */
+    sys_log_text(motor_l, "%.2f,%.2f", (double)target, (double)measured);
+}
+#endif
+
 /* 左电机 + 左编码器 */
 motor_t motor_left = {
     .pwm_channel = MOTOR_LEFT_PWM,
@@ -221,6 +247,7 @@ void motor_update_single(motor_t *motor)
     float speed_error;
     float abs_error;
     float duty;
+    const bool is_left = (motor == &motor_left);
 
     if (motor == NULL) {
         sys_log_text(error, "Motor: update NULL");
@@ -232,6 +259,13 @@ void motor_update_single(motor_t *motor)
         target_speed = pid_calculate(&motor->position_pid, motor->target_position,
                                      (float)current_position);
     } else if (motor->mode == MOTOR_MODE_OPENLOOP) {
+        current_speed = encoder_get_filtered_speed(motor->encoder);
+#if MOTOR_L_PLOT_ENABLE
+        if (is_left) {
+            /* 开环：通道0=目标 duty，通道1=实测速度（单位不同，仅作对照） */
+            motor_plot_left((float)motor->target_pwm, current_speed);
+        }
+#endif
         motor_set_duty(motor, motor->target_pwm);
         return;
     } else {
@@ -239,6 +273,14 @@ void motor_update_single(motor_t *motor)
     }
 
     current_speed = encoder_get_filtered_speed(motor->encoder);
+
+#if MOTOR_L_PLOT_ENABLE
+    if (is_left) {
+        /* 速度/位置环：通道0=目标速度，通道1=实测速度（counts/2ms） */
+        motor_plot_left(target_speed, current_speed);
+    }
+#endif
+
     speed_error = target_speed - current_speed;
     abs_error = (speed_error > 0.0f) ? speed_error : -speed_error;
 
