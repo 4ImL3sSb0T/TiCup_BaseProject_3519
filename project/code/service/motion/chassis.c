@@ -29,6 +29,8 @@ static float chassis_yaw_rate_kp = 1.2f;
 static float chassis_yaw_rate_ki = 0.3f;
 static float chassis_heading_kp = 2.0f;
 static float chassis_heading_ki = 0.0f;
+/** 航向 D：对 gyro.z 阻尼（deg/s → 输出 deg/s），比 d(err)/dt 抗噪 */
+static float chassis_heading_kd = 0.15f;
 
 /* -------------------------------------------------------------------------- */
 /* 运行时状态                                                                   */
@@ -74,6 +76,7 @@ static float wrap_deg(float err)
 static void chassis_apply_param_to_pid(void)
 {
     pid_update_params(&s_yaw_rate_pid, chassis_yaw_rate_kp, chassis_yaw_rate_ki, 0.0f);
+    /* 航向环库内仅 P/I；D 在 update 里用 gyro 阻尼单独叠加 */
     pid_update_params(&s_heading_pid, chassis_heading_kp, chassis_heading_ki, 0.0f);
 }
 
@@ -178,7 +181,7 @@ exit_code_t chassis_init(void)
              CHASSIS_DT_S, -chassis_max_omega, chassis_max_omega);
     pid_reset(&s_yaw_rate_pid);
 
-    /* 航向环输出：期望角速度 (deg/s) */
+    /* 航向环：P(+可选I) 输出期望角速度；D 用 gyro 阻尼在 update 叠加 */
     pid_init(&s_heading_pid, chassis_heading_kp, chassis_heading_ki, 0.0f,
              CHASSIS_DT_S, -chassis_max_omega, chassis_max_omega);
     pid_reset(&s_heading_pid);
@@ -194,6 +197,7 @@ exit_code_t chassis_init(void)
     assert_fun(param_add("chassis_yaw_rate_ki", PARAM_TYPE_FLOAT, &chassis_yaw_rate_ki, true));
     assert_fun(param_add("chassis_heading_kp", PARAM_TYPE_FLOAT, &chassis_heading_kp, true));
     assert_fun(param_add("chassis_heading_ki", PARAM_TYPE_FLOAT, &chassis_heading_ki, true));
+    assert_fun(param_add("chassis_heading_kd", PARAM_TYPE_FLOAT, &chassis_heading_kd, true));
 
     s_mode = CHASSIS_MODE_IDLE;
     s_target_v = 0.0f;
@@ -371,11 +375,18 @@ void chassis_update(void)
             if (!s_imu_ready) {
                 return;
             }
+            /*
+             * 航向 PD(+可选 I)：
+             *   ω* = Kp·e + Ki·∫e  −  Kd·gyro.z
+             * D 用角速度反馈阻尼，避免对 yaw 噪声求导放大。
+             * 输出限幅后作为角速度内环设定。
+             */
             yaw = chassis_read_yaw_deg();
             heading_err = wrap_deg(s_target_heading - yaw);
-            /* setpoint=err 的跟踪：用 0 作 setpoint、feedback=-err 等价于输出纠偏 */
-            omega_cmd_deg = pid_calculate(&s_heading_pid, heading_err, 0.0f);
             gyro_z = chassis_read_gyro_z();
+            omega_cmd_deg = pid_calculate(&s_heading_pid, heading_err, 0.0f);
+            omega_cmd_deg -= chassis_heading_kd * gyro_z;
+            omega_cmd_deg = clampf(omega_cmd_deg, -chassis_max_omega, chassis_max_omega);
             omega_out_deg = pid_calculate(&s_yaw_rate_pid, omega_cmd_deg, gyro_z);
             omega_wheel = omega_out_deg * chassis_omega_to_wheel;
             chassis_kinematics(v, omega_wheel, &left, &right);
@@ -449,9 +460,10 @@ cmd_exec_result_t chassis_command_handler(i32 seq, int argc, char **argv)
     if (strcmp(cmd, "param") == 0) {
         chassis_apply_param_to_pid();
         sys_log_text(terminal,
-                     "chassis PID applied yr_kp=%.2f yr_ki=%.2f hd_kp=%.2f hd_ki=%.2f",
+                     "chassis PID applied yr_kp=%.2f yr_ki=%.2f "
+                     "hd_kp=%.2f hd_ki=%.2f hd_kd=%.2f",
                      chassis_yaw_rate_kp, chassis_yaw_rate_ki,
-                     chassis_heading_kp, chassis_heading_ki);
+                     chassis_heading_kp, chassis_heading_ki, chassis_heading_kd);
         return CMD_EXEC_CTX(EXIT_OK, "param_applied");
     }
 

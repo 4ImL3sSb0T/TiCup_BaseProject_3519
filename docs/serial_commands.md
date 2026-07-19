@@ -151,8 +151,9 @@ load
 | `chassis_imu_yaw_sign` | FLOAT | -1.0 | 航向/陀螺符号（乘到 gyro.z / yaw）；方向反了改符号 |
 | `chassis_yaw_rate_kp` | FLOAT | 1.2 | 角速度环 Kp |
 | `chassis_yaw_rate_ki` | FLOAT | 0.3 | 角速度环 Ki |
-| `chassis_heading_kp` | FLOAT | 2.0 | 航向环 Kp |
-| `chassis_heading_ki` | FLOAT | 0.0 | 航向环 Ki |
+| `chassis_heading_kp` | FLOAT | 2.0 | 航向环 Kp（对角度误差） |
+| `chassis_heading_ki` | FLOAT | 0.0 | 航向环 Ki（建议 0，归正易极限环） |
+| `chassis_heading_kd` | FLOAT | 0.15 | 航向环 Kd（对 gyro.z 阻尼，非 d(err)/dt） |
 
 **注意：**
 

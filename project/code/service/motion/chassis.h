@@ -7,7 +7,7 @@
  *   OPENLOOP  v,ω → 左右 PWM（经 motor 开环）
  *   SPEED     v,ω → 左右轮速（编码器速度环）
  *   YAW_RATE  SPEED + gyro.z 角速度内环
- *   HEADING   航向外环 → 角速度内环 → SPEED
+ *   HEADING   航向 PD 外环(ω*=Kp·e−Kd·gyro) → 角速度内环 → SPEED
  *
  * 周期建议：chassis_update 10ms；motor 2ms；imu 1ms
  */
