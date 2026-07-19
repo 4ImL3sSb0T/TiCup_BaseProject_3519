@@ -18,10 +18,11 @@ enum {
 };
 
 /*
- * TODO: remap keys before enabling with motors.
- * B12/B13 conflict with right motor PWM/DIR (see docs/hardware.md).
+ * 主板板载按键（与 zf_device_key KEY_LIST / motherboard_3507_pinout 一致）
+ *   UP=A30, DOWN=A31, MAIN=B0, AUX=B1
+ * 低电平有效（上拉输入，按下接地）
  */
-static const gpio_pin_enum s_button_pins[MJC_BUTTON_COUNT] = { B13, B12, B14, B15 };
+static const gpio_pin_enum s_button_pins[MJC_BUTTON_COUNT] = { A30, A31, B0, B1 };
 static Button s_buttons[MJC_BUTTON_COUNT];
 static event_listener_id_t s_evt_press = EVENT_LISTENER_ID_INVALID;
 static event_listener_id_t s_evt_click = EVENT_LISTENER_ID_INVALID;

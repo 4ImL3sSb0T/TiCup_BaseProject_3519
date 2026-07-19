@@ -49,7 +49,7 @@ init done. try: help / show / export / save
 | 无 UART2 | 3519 硬件无 UART2；同脚位用 UART7 |
 | 参数持久化 | `fs_service` + LFS（DATA Flash）；旧 `storage`（MAIN 扇区）已废弃，勿再接入 param |
 | 电机/底盘 | 当前禁用（B7 无线 RX）；恢复后其 `param_add` 会自动参与 save/load |
-| GUI/按键 | `mjc_input_button` 引脚需按实板确认 |
+| GUI/按键 | `mjc_input_button` 已用主板 **A30/A31/B0/B1**（与 `KEY_LIST` 一致） |
 | 日志默认 | `main.c` 中 `sys_log_init(SYS_LOG_WIFI)` 与 3507 一致；无 WiFi 时可改为 `SYS_LOG_UART` |
 
 ## 目录结构

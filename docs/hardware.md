@@ -27,6 +27,7 @@
 | 命令串口 | `project/code/service/com/cmd_service.c` |
 | 日志通道 | `project/code/service/sys/sys_log.c` / `sys_log.h` |
 | 参数 / LFS | `project/code/service/com/param.*`、`service/fs/fs_service.*`、`bsp/flash` |
+| GUI 按键 | `project/code/service/gui/MujicaUI_Lite/mjc_input_button.c` |
 | 无线转串口 | `libraries/zf_device/zf_device_wireless_uart.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
 | IMU963RA | `libraries/zf_device/zf_device_imu963ra.h` |
@@ -106,6 +107,7 @@
 | B21 | IMU SPI1 MISO |
 | B22 | IMU SPI1 MOSI |
 | B23 | IMU SPI1 SCK |
+| **A30 / A31 / B0 / B1** | **GUI 板载按键**（UP/DOWN/MAIN/AUX；与 `KEY_LIST` 一致） |
 
 ### 3.1b 暂释放（代码保留宏，main 未 init）
 
@@ -150,9 +152,9 @@
 | **无线 RX vs 右编码器 CH1** | **B7** | **当前优先底盘**：B7=右编码器 CH1；无线 UART1 **暂不 init**（`SYS_LOG_UART` + `CMD_SERVICE_ENABLE_WIRELESS=0`）。恢复无线须改编码器脚或关底盘。 |
 | **UART3 暂禁用** | A14/A13 | 原命令串口 UART3 已关闭；A14 给 LED。 |
 | **WiFi SPI 暂不可用** | SPI0 组 | 勿依赖 `SYS_LOG_WIFI` / `wifi_spi_read_buffer`。 |
-| **右电机 DIR vs GUI 按键例程** | B13 | 与 `mjc_input_button` 示例冲突，启用屏按键前改脚。 |
 | **SPI0 总线** | A9/A12/A13… | WiFi SPI 与 IPS 屏常共用 SPI0 不同 CS。 |
 | **3519 无 UART2** | — | 原 3507 的 UART2 场景改 **UART7** 或其它实例。 |
+| ~~右电机 vs GUI 按键~~ | ~~B12/B13~~ | **已消除**：按键已改主板 **A30/A31/B0/B1** |
 
 ---
 
@@ -167,6 +169,28 @@
 
 - 命令 mask：`bit0=左`，`bit1=右`（0x1 / 0x2 / 0x3）。
 - 源码：`motor.h` / `motor.c`。
+- **与按键**：B12/B13 已不再被 GUI 占用，当前右电机可与按键共存。
+
+#### 4.1.1 主板有刷电机座 PWM 脚与软件可用性
+
+主板丝印「有刷电机 PWM」：`B8 B9 B12 B13 B10 B11 A26 A27`（见 `motherboard_3507_pinout.md`）。  
+对照本工程占用 + `zf_driver_pwm.h` 可复用宏：
+
+| 主板电机座脚 | 本工程占用 | 库内典型 PWM 宏（示例） | 改脚建议 |
+|--------------|------------|-------------------------|----------|
+| **B8** | **空闲** | `PWM_TIM_A0_CH0_B8` | **首选备选**：可作左/右 PWM，仍用 TIM_A0 |
+| **B10** | **空闲** | `PWM_TIM_G0_CH0_B10` / `PWM_TIM_G6_CH0_B10` | 可用；注意 G6 方向编码器备用时冲突 |
+| **B11** | **空闲** | `PWM_TIM_G0_CH1_B11` / `PWM_TIM_G6_CH1_B11` | 可用；同上 |
+| B12 | 右电机 PWM（当前） | `PWM_TIM_A0_CH2_B12` | **保持**（官方 DRV8701 例程） |
+| B13 | 右电机 DIR（当前） | 亦可作 `PWM_TIM_A0_CH3_B13` | 现作 DIR GPIO；若改双 PWM 需另找 DIR |
+| B9 | **右编码器 CH2** | `PWM_TIM_A0_CH1_B9` | **不可用**（正交编码器） |
+| A26 / A27 | **左编码器 A/B** | — | **不可用**（正交编码器） |
+
+**其它说明：**
+
+- 当前左路 **A0 PWM + A1 DIR** 来自 DRV8701 例程；主板上 A0/A1 丝印为 ToF，**不是**电机座脚。若走底板电机座排线，左路更宜迁到 **B8**（PWM）+ 任意空闲 GPIO 作 DIR。
+- 双电机同频推荐继续 **共 TIM_A0** 不同 CH：例如左 `CH0@B8`、右 `CH2@B12`；DIR 用任意空闲 GPIO（勿占慎用脚 A19/A20/A5/A6/A4/A3、勿占 A14）。
+- **当前固件不改电机宏**：B12/B13 与按键已无冲突；换脚须同步灰排线 + `motor.h` + 本文 §1/§3。
 
 ### 4.2 编码器（正交）
 
@@ -227,9 +251,18 @@
 典型 IPS200 SPI：`SPI0`，SCK A12，MOSI A9，RST A7，DC A15，CS A8，BLK A13 等。  
 **启用 GUI 前**：对照 §3 占用表，避免与 WiFi / 电机冲突。
 
-### 6.3 GUI 按键示例（未与电机共存）
+### 6.3 GUI 按键（主板板载键，已与电机共存）
 
-`mjc_input_button.c` 曾用 B13/B12/B14/B15 —— **B12/B13 已被右电机占用**，启用前必须重映射。
+| UI 键 | 引脚 | 说明 |
+|-------|------|------|
+| UP | **A30** | 上移 / 编辑 − |
+| DOWN | **A31** | 下移 / 编辑 + |
+| MAIN | **B0** | 进入 / 确认 |
+| AUX | **B1** | 返回 / 取消 |
+
+- 源码：`mjc_input_button.c` 的 `s_button_pins`；与 `zf_device_key.h` 的 `KEY_LIST {A30,A31,B0,B1}` 及主板丝印一致。
+- 电平：上拉输入，**低电平有效**（`MJC_BUTTON_ACTIVE_LEVEL=0`）。
+- 旧例程脚 B13/B12/B14/B15 **已废弃**，勿再使用。
 
 ---
 
@@ -267,6 +300,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-19 | **GUI 按键改主板** A30/A31/B0/B1；消除与右电机 B12/B13 冲突；补充主板电机座 PWM 备选（B8/B10/B11） |
 | 2026-07-19 | **启用底盘/电机/编码器**；**无线 UART1 暂关**（B7→右编码器）；命令/日志仅 UART0 |
 | 2026-07-19 | **重点写入**官方「尽量不要使用的引脚」：A19/A20/A5/A6/A4/A3（E01_gpio_demo 原文）+ A14 LED 保留；强制规则与改脚清单同步 |
 | 2026-07-18 | 初版：汇总电机/正交编码器/PIT/UART/LED/IMU/WiFi 及冲突策略 |

@@ -146,11 +146,11 @@ flowchart LR
 
 - 编辑缓冲：过程中不改 `value_ptr`；值前显示 `*`
 - 会话 step 可双击改 decade，不永久改 `item->data.number.step`
-- 引脚默认 B13/B12/B14/B15 —— **B12/B13 与右电机冲突**，启用前须改脚（见 `docs/hardware.md`）
+- 引脚：**A30 / A31 / B0 / B1**（主板板载按键 UP/DOWN/MAIN/AUX，见 `docs/hardware.md` §6.3）
 
 ### 快速接入（与本工程 `main` 风格一致）
 
-当前 `main.c` **尚未接入 GUI**（电机优先）。接入前请先解决按键引脚冲突。
+当前 `main.c` **尚未接入 GUI**。按键脚已与主板/电机对齐（A30/A31/B0/B1），可直接接线验证。
 
 ```c
 #include "service/gui/MujicaUI_Lite/mjc_core.h"
@@ -206,7 +206,7 @@ void gui_app_init(void)
 
 **接入检查清单**
 1. `event_init()`、`soft_timer_init()` 已完成
-2. **改键脚** 避开右电机 B12/B13（并回写 `docs/hardware.md`）
+2. 按键已固定主板 **A30/A31/B0/B1**（见 `docs/hardware.md` §6.3）
 3. `mjc_init(&root_page)` → 初始化屏 + 页面树
 4. `mjc_buttons_init()` → GPIO + 订阅按键事件
 5. **5ms** soft_timer：`mjc_buttons_tick_5ms()`
