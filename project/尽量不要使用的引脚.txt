@@ -12,6 +12,8 @@ A3
 ---
 来源（官方）:
 D:\Project\TI_Cup\MSPM0G3519_Library-master\Example\Coreboard_Demo\E01_gpio_demo\尽量不要使用的引脚.txt
-工程文档:
-docs/hardware.md §3.2
-docs/motherboard_3507_pinout.md
+
+文档职责:
+- 本文件: 核心板慎用脚官方列表副本
+- 主板丝印/慎用脚说明: docs/motherboard_3507_pinout.md
+- 固件已启用占用: docs/hardware.md

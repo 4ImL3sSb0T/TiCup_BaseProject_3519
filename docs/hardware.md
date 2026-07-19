@@ -1,359 +1,181 @@
-# 硬件资源与引脚手册（必读）
+# 硬件资源手册（固件已启用）
 
+> **职责（仅此）**  
+> 记录 **本工程固件当前已初始化、已占用** 的引脚 / 定时器 / 通信通道。  
+> **不写** 主板丝印全集、未接线外设、芯片规格对比——那些见文末「相关文档」。
+>
 > **强制规则**  
-> 任何涉及 **引脚分配、定时器/UART/SPI 复用、外设接线、改电机/编码器/串口/IMU/屏/WiFi** 的开发，**必须先读并更新本文件**，再改代码。  
-> 禁止在未查本表的情况下“先改宏再试”；禁止占用「**尽量不要使用的引脚**」与「已占用资源」。  
-> **核心板慎用脚（重点，官方原文）：`A19 A20 A5 A6 A4 A3`** —— 特殊功能脚，占用可能导致核心板异常；**A14** 为板载 LED，IO 够用时勿占。详见 **§3.2**。  
-> 代码与本文件冲突时：**以本文件 + 实际主板丝印为准**，改完代码必须同步回写本文件。
+> 改脚 / 改外设前先读本文；改完代码必须回写本文。  
+> 代码与本文冲突时，以 **本文 + 主板丝印** 为准。  
+> 新功能选脚还须避开核心板慎用脚（见 `project/尽量不要使用的引脚.txt`，丝印侧见 `motherboard_3507_pinout.md`）。
 
 | 项 | 值 |
 |----|-----|
-| 平台（固件） | MSPM0G3519 + 逐飞 SEEKFREE 开源库（**3519 专用，勿混 3507 库**） |
-| **实物主板** | **目前使用 MSPM0G3507 主板**；**尚无 3519 专用主板**（核心板可上 3519，底板按 3507 图） |
-| 主板全引脚图 | 见 **`docs/motherboard_3507_pinout.md`**（丝印 / 可接外设全集） |
+| 平台 | MSPM0G3519 + 逐飞 3519 库（**勿混 3507 库**） |
+| 实物底板 | MSPM0G3507 主板（尚无 3519 专用主板） |
+| 主时钟 | 80 MHz |
 | 工程 | `BaseProject_3519` |
-| 主时钟 | 80 MHz（`clock_init(SYSTEM_CLOCK_80M)`） |
-| 参考库例程 | `D:\Project\TI_Cup\MSPM0G3519_Library-master\Example\` |
-| 芯片差异 | 见 `docs/MSPM0G3507_vs_MSPM0G3519.md` |
-| 移植说明 | 见 `docs/PORTING_NOTES.md` |
 
-**配置源文件（改脚时优先改这些，并回写本文）：**
+**配置源文件（改脚时改这些并回写本文）：**
 
-| 模块 | 头文件 / 位置 |
-|------|----------------|
-| 总览与 LED 心跳 | `project/user/src/main.c` |
-| 电机 | `project/code/service/motion/motor.h` |
-| 编码器 | `project/code/service/motion/encoder.h` |
-| 命令串口 | `project/code/service/com/cmd_service.c` |
-| 日志通道 | `project/code/service/sys/sys_log.c` / `sys_log.h` |
-| 参数 / LFS | `project/code/service/com/param.*`、`service/fs/fs_service.*`、`bsp/flash` |
-| GUI 应用 | `project/code/service/gui/gui_app.c` |
-| GUI 按键 | `project/code/service/gui/MujicaUI_Lite/mjc_input_button.c` |
-| 无线转串口 | `libraries/zf_device/zf_device_wireless_uart.h` |
+| 模块 | 位置 |
+|------|------|
+| 入口 / LED | `project/user/src/main.c` |
+| 电机 | `service/motion/motor.h` |
+| 编码器 | `service/motion/encoder.h` |
+| 命令 | `service/com/cmd_service.c` |
+| 日志 | `service/sys/sys_log.*` |
+| 参数 / LFS | `service/com/param.*`、`service/fs/*`、`bsp/flash` |
+| GUI | `service/gui/gui_app.c`、`MujicaUI_Lite/mjc_input_button.c` |
+| IMU 库默认 | `libraries/zf_device/zf_device_imu963ra.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
-| IMU963RA | `libraries/zf_device/zf_device_imu963ra.h` |
-| WiFi SPI | `libraries/zf_device/zf_device_wifi_spi.h`（**当前未用**） |
-| 屏 IPS200/114 | `libraries/zf_device/zf_device_ips200.h` 等 |
 
 ---
 
-## 1. 当前生效的资源总表（本工程在用）
+## 1. 已启用资源总表
 
-| 功能 | 外设 / 定时器 | 引脚 | 说明 | 官方例程参考 |
-|------|---------------|------|------|--------------|
-| 左电机 PWM | **TIM_G0 CH0** | **B10** | DRV8701；**M4 同组**（B10 无 TIM_A0 复用） | 自改脚 |
-| 左电机 DIR | GPIO | **B11** | **M4 同组** | 同上 |
-| 右电机 PWM | TIM_A0 CH2 | **B12** | **M2 同组** | E3_04_drv8701e_double |
-| 右电机 DIR | GPIO | **B13** | **M2 同组** | 同上 |
-| 左编码器 A/B | TIM_G8 正交 | **A26 / A27** | | E2_01_encoder_quadrature |
-| 右编码器 A/B | TIM_G9 正交 | **B7 / B9** | B7 = CH1 | 同上 |
-| 底盘 | software | — | `chassis_init` + 10ms `chassis_update` | — |
-| 系统 1ms 节拍 | PIT_TIM_G12 | —（无 GPIO） | `sys_time_ms` | — |
-| 命令 + 日志（主） | UART0 | **A10 TX / A11 RX** | 115200；`SYS_LOG_UART` + `cmd_service` | 核心板 debug |
-| 核心板蓝灯 | GPIO | **A14** | 500ms soft_timer 翻转 | E01_gpio_demo |
-| ~~无线转串口~~ | ~~UART1~~ | ~~B6 / B7 / B2~~ | **暂关闭**（B7 给右编码器） | — |
-| ~~命令/日志 WiFi SPI~~ | SPI0 | — | **暂不可用**，勿接线依赖 | — |
-| IMU | SPI1 | B23/B22/B21 + CS B19 | IMU963RA 默认 SPI | E4_03_imu963ra |
-| **GUI 屏 IPS200** | **SPI0** | **A12 SCK / A9 MOSI / A7 RST / A15 DC / A8 CS / A13 BLK** | `gui_app_init` → MujicaUI | 库默认 |
-| **GUI 按键** | GPIO | **A30 / A31 / B0 / B1** | UP/DOWN/MAIN/AUX | 主板丝印 |
-| 参数持久化 | LittleFS（片内 **DATA Flash**） | —（无 GPIO） | `/param.txt` key=value；`fs_service` + `bsp_flash`；**非** MAIN `storage` 扇区 | — |
+| 功能 | 外设 / 定时器 | 引脚 | 说明 |
+|------|---------------|------|------|
+| 左电机 PWM | TIM_G0 CH0 | **B10** | `PWM_TIM_G0_CH0_B10`；电机座 **M4** |
+| 左电机 DIR | GPIO | **B11** | M4 同组 |
+| 右电机 PWM | TIM_A0 CH2 | **B12** | `PWM_TIM_A0_CH2_B12`；电机座 **M2** |
+| 右电机 DIR | GPIO | **B13** | M2 同组 |
+| 左编码器 | TIM_G8 正交 | **A26 / A27** | polarity=0 |
+| 右编码器 | TIM_G9 正交 | **B7 / B9** | polarity=1；B7=CH1 |
+| 底盘 | software | — | `chassis_init` + 10 ms `chassis_update` |
+| 系统 1 ms | PIT_TIM_G12 | — | `sys_time_ms` |
+| 命令 + 日志 | UART0 | **A10 TX / A11 RX** | 115200；`SYS_LOG_UART` |
+| 核心板 LED | GPIO | **A14** | 500 ms 心跳 |
+| IMU963RA | SPI1 | **B23/B22/B21 + CS B19** | `imu_init` |
+| IPS200 | SPI0 | **A12/A9/A7/A15/A8/A13** | SCK/MOSI/RST/DC/CS/BLK |
+| GUI 按键 | GPIO | **A30/A31/B0/B1** | UP/DOWN/MAIN/AUX |
+| 参数持久化 | DATA Flash + LFS | — | `/param.txt`；非 MAIN `storage` |
 
-电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`。
-
----
-
-## 2. 定时器占用（严禁重复）
-
-| 定时器 | 用途 | 可否再占用 |
-|--------|------|------------|
-| **TIM_A0** | 右电机 PWM（B12） | 否（CH2）；CH0/CH1/CH3 可另规划 |
-| **TIM_G0** | **左电机 PWM（B10）** | 否 |
-| **TIM_G8** | 左正交编码器 | 否（不可再作 B10 PWM） |
-| **TIM_G9** | 右正交编码器 | 否 |
-| **PIT_TIM_G12** | 系统 1ms | 否 |
-| UART1 | 无线转串口（**暂未 init**） | 可临时；恢复无线后与 B7 编码器冲突 |
-| TIM_G6 / TIM_G7 | 方向编码器例程用，**本工程正交模式未用** | 可规划；G6 亦有 B10/B11 PWM 复用，勿与左电机抢 |
-| TIM_A1、TIM_G14 等 | 未占用 | 新功能优先从这里选 |
-
-**正交编码器硬性限制（逐飞库）：**
-
-- `encoder_quad_init` **仅允许** `TIM_G8`、`TIM_G9`（库内 `zf_assert`）。
-- 方向模式 `encoder_dir_init` 可用 G6/G7 等，引脚与正交不同，**不要混用两种模式的脚**。
-
-**方向模式（备用，非当前配置）：**
-
-| 编码器 | 定时器 | LSB | DIR |
-|--------|--------|-----|-----|
-| 左 | TIM_G7 | A26 | B27 |
-| 右 | TIM_G6 | B10 | B11 |
-
-例程：`E2_02_encoder_dir_demo`。若切回方向模式，必须改 `encoder.h` / `encoder.c` **并更新本文件 §1**。  
-**当前左电机已占用 M4 的 B10/B11**，方向模式右编码器例程（G6: B10/B11）**不可直接照搬**，须另选脚。
+- 电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`
+- 电机座物理分组（M1–M4）见 **`motherboard_3507_pinout.md`**；本文只记本工程接了哪两组。
 
 ---
 
-## 3. 引脚占用一览
+## 2. 定时器占用
 
-### 3.1 已占用（本工程业务）
+| 定时器 | 用途 | 可否再占 |
+|--------|------|----------|
+| TIM_A0 | 右电机 PWM（CH2=B12） | CH2 否；其它 CH 可规划 |
+| TIM_G0 | 左电机 PWM（B10） | 否 |
+| TIM_G8 | 左正交编码器 | 否 |
+| TIM_G9 | 右正交编码器 | 否 |
+| PIT_TIM_G12 | 系统 1 ms | 否 |
+
+库限制：`encoder_quad_init` **仅** TIM_G8 / TIM_G9。
+
+---
+
+## 3. 引脚占用（已启用）
 
 | 引脚 | 功能 |
 |------|------|
-| **A7** | **IPS200 RST** |
-| **A8** | **IPS200 CS** |
-| **A9** | **IPS200 MOSI（SPI0）** |
-| A10 | UART0 TX（命令 + 日志） |
-| A11 | UART0 RX（命令 + 日志） |
-| **A12** | **IPS200 SCK（SPI0）** |
-| **A13** | **IPS200 BLK** |
-| A14 | **核心板 LED**（心跳） |
-| **A15** | **IPS200 DC** |
+| A7 | IPS200 RST |
+| A8 | IPS200 CS |
+| A9 | IPS200 MOSI（SPI0） |
+| A10 | UART0 TX |
+| A11 | UART0 RX |
+| A12 | IPS200 SCK（SPI0） |
+| A13 | IPS200 BLK |
+| A14 | 核心板 LED |
+| A15 | IPS200 DC |
 | A26 / A27 | 左编码器 A/B |
-| **A30 / A31 / B0 / B1** | **GUI 板载按键**（UP/DOWN/MAIN/AUX；与 `KEY_LIST` 一致） |
-| **B7** | **右编码器 CH1**（TIM_G9） |
-| B8 | 有刷电机座 M1 空闲（曾作左 PWM，已迁 M4） |
-| B9 | 右编码器 CH2 |
-| **B10** | **左电机 PWM**（M4，TIM_G0） |
-| **B11** | **左电机 DIR**（M4） |
-| B12 | 右电机 PWM（M2） |
-| B13 | 右电机 DIR（M2） |
-| B19 | IMU CS |
-| B21 | IMU SPI1 MISO |
-| B22 | IMU SPI1 MOSI |
-| B23 | IMU SPI1 SCK |
+| A30 / A31 / B0 / B1 | GUI 按键 |
+| B7 / B9 | 右编码器 CH1 / CH2 |
+| B10 / B11 | 左电机 PWM / DIR |
+| B12 / B13 | 右电机 PWM / DIR |
+| B19 / B21 / B22 / B23 | IMU CS / MISO / MOSI / SCK |
 
-### 3.1b 暂释放（代码保留宏，main 未 init）
+因占用产生的约束（选脚时注意）：
 
-| 引脚 | 原功能 | 说明 |
-|------|--------|------|
-| B6 / B2 | 无线串口 TX / RTS | 无线暂关；**B7 已改给编码器** |
-| A16 / A17 / B20 | WiFi SPI 侧 CS/RST/INT | **模块暂不可用**；**A9/A12/A13 已给 IPS200** |
-
-### 3.2 核心板「尽量不要使用的引脚」（重点 · 官方）
-
-> **来源（权威）**  
-> `D:\Project\TI_Cup\MSPM0G3519_Library-master\Example\Coreboard_Demo\E01_gpio_demo\尽量不要使用的引脚.txt`  
-> 工程内副本：`project/尽量不要使用的引脚.txt`（含 A14 补充说明）  
-> 改脚、规划新外设时 **必须先避开下表**，再查 §3.1 占用与 §3.3 冲突。
-
-**官方原文（逐飞 E01_gpio_demo）：**
-
-> 尽量不要使用以下引脚，以下引脚属于特殊功能引脚，使用可能会导致核心板异常。  
-> 因此建议大家尽量不要使用。  
-> **A19、A20、A5、A6、A4、A3**
-
-| 引脚 | 级别 | 原因 / 说明 |
-|------|------|-------------|
-| **A19** | **尽量不用** | 核心板特殊功能脚；占用可能导致核心板异常 |
-| **A20** | **尽量不用** | 同上 |
-| **A5** | **尽量不用** | 同上 |
-| **A6** | **尽量不用** | 同上 |
-| **A4** | **尽量不用** | 同上 |
-| **A3** | **尽量不用** | 同上 |
-| **A14** | **优先保留** | 核心板蓝色 LED；IO 富余时勿占用，便于心跳/状态指示（本工程已用做 500ms 心跳） |
-
-**工程约定：**
-
-- 新功能选脚时：**禁止默认使用 A19/A20/A5/A6/A4/A3**；若硬件强制占用，须在本文与变更记录中写明原因与风险。  
-- **A14** 留给 LED；不要再把 UART3_TX 等业务叠在 A14 上。  
-- 本工程当前 **§3.1 已占用表中不含** 上述 6 个慎用脚（正确）。
-
-### 3.3 已知冲突（必须处理）
-
-| 冲突 | 引脚 | 现状与策略 |
-|------|------|------------|
-| **无线 RX vs 右编码器 CH1** | **B7** | **当前优先底盘**：B7=右编码器 CH1；无线 UART1 **暂不 init**（`SYS_LOG_UART` + `CMD_SERVICE_ENABLE_WIRELESS=0`）。恢复无线须改编码器脚或关底盘。 |
-| **UART3 暂禁用** | A14/A13 | 原命令串口 UART3 已关闭；A14 给 LED。 |
-| **WiFi SPI 暂不可用** | SPI0 组 | 屏已占用 SPI0 数据线（A12/A9/A13 等）；勿依赖 `SYS_LOG_WIFI`。 |
-| **SPI0 总线** | A9/A12/A13… | WiFi SPI 与 IPS 屏常共用 SPI0 不同 CS。 |
-| **3519 无 UART2** | — | 原 3507 的 UART2 场景改 **UART7** 或其它实例。 |
-| ~~右电机 vs GUI 按键~~ | ~~B12/B13~~ | **已消除**：按键已改主板 **A30/A31/B0/B1** |
-
----
-
-## 4. 运动系统接线
-
-### 4.1 电机（DRV8701，灰排线）
-
-| 轮 | PWM 宏 | 引脚 | DIR | 座子组 |
-|----|--------|------|-----|--------|
-| 左 `motor_left` | `PWM_TIM_G0_CH0_B10` | **B10** | **B11** | **M4 同组** |
-| 右 `motor_right` | `PWM_TIM_A0_CH2_B12` | **B12** | **B13** | **M2 同组** |
-
-- 命令 mask：`bit0=左`，`bit1=右`（0x1 / 0x2 / 0x3）。
-- 源码：`motor.h` / `motor.c`。
-- **接线**：四线均在 3507 主板「有刷电机」座（灰排线）；**不再用 ToF 座 A0/A1**。
-- **与按键**：B12/B13 已不再被 GUI 占用，当前右电机可与按键共存。
-
-#### 4.1.1 主板有刷电机座：4 组 ×（PWM + DIR）
-
-> 权威分组见 **`docs/motherboard_3507_pinout.md` §有刷电机座分组**。  
-> 座上 8 脚 **不是** 8 路独立 PWM，而是 **4 组**，每组内 **一根 PWM + 一根 DIR**。
-
-| 组 | 脚对 | 本工程占用 |
-|----|------|------------|
-| **M1** | **B8 / B9** | **B9** = 右编码器 CH2；**B8 空闲**（M1 不能整组作电机） |
-| **M2** | **B12 / B13** | **右电机** PWM+DIR（同组） |
-| **M3** | **A27 / A26** | **左编码器** 正交（不可当电机） |
-| **M4** | **B11 / B10** | **左电机** PWM+DIR（同组）：B10 PWM / B11 DIR |
-
-| 主板电机座脚 | 本工程占用 | 说明 |
-|--------------|------------|------|
-| **B8** | 空闲 | M1；可另作 GPIO/扩展 |
-| **B9** | 右编码器 CH2 | M1；**不可给电机** |
-| **B12** | **右电机 PWM** | M2；`PWM_TIM_A0_CH2_B12` |
-| **B13** | **右电机 DIR** | M2 |
-| **B10** | **左电机 PWM** | M4；`PWM_TIM_G0_CH0_B10`（B10 无 TIM_A0） |
-| **B11** | **左电机 DIR** | M4；GPIO |
-| **A26 / A27** | 左编码器 A/B | M3 整组；**不可给电机** |
-
-**注意：**
-
-- 左电机已整组落在 **M4**，与右电机 **M2** 对称、同组接线。  
-- 方向编码器例程（G6: B10/B11）与左电机冲突，勿并行启用。  
-- 若将来右编码器不用 B9，才可考虑左电机改回 **M1（B8/B9）**。
-
-### 4.2 编码器（正交）
-
-| 轮 | 定时器 | CH1 (A 相) | CH2 (B 相) | 极性（软件） |
-|----|--------|------------|------------|--------------|
-| 左 `encoder_left` | TIM_G8 | A26 | A27 | polarity=0 |
-| 右 `encoder_right` | TIM_G9 | B7 | B9 | polarity=1（方向取反） |
-
-- 初始化：`encoder_quad_init`。
-- 若实车方向反了：只改 `polarity`，不要乱换左右脚除非硬件重接。
-- 源码：`encoder.h` / `encoder.c`。
-
-### 4.3 底盘
-
-- **当前固件：底盘已启用**（`chassis_init` + 10ms `chassis_update`；2ms `encoder`+`motor`）。
-- 差速：`chassis` 依赖 motor + encoder；IMU 可选（航向/角速度闭环）。
-- 上电默认 `CHASSIS_MODE_IDLE`（停车）；串口试：`help` / `chassis status` / `chassis openloop ...`。
-
----
-
-## 5. 通信
-
-| 通道 | 外设 | 引脚 | 波特率 / 速率 | 用途 |
-|------|------|------|---------------|------|
-| **命令 + 日志（主）** | **UART0** | **A10 TX / A11 RX** | 115200 | `sys_log_init(SYS_LOG_UART)` + `debug_read_ring_buffer` |
-| ~~无线转串口~~ | ~~UART1~~ | ~~B6 / B7 / B2~~ | — | **暂关闭**（`CMD_SERVICE_ENABLE_WIRELESS=0`） |
-| ~~命令/日志 WiFi SPI~~ | SPI0 | A12/A9/A13/B20/A17/A16 | — | **暂不可用** |
-| ~~命令 UART3~~ | ~~UART3~~ | ~~A14/A13~~ | — | **暂禁用** |
-
-日志类型（`sys_log.h`）：
-
-| 枚举 | 后端 |
+| 约束 | 说明 |
 |------|------|
-| `SYS_LOG_UART` | Debug UART0（**当前**） |
-| `SYS_LOG_WIRELESS` | `wireless_uart_*`（保留；与 B7 编码器冲突） |
-| `SYS_LOG_WIFI` | WiFi SPI（保留，硬件可用后再开） |
-
-无线脚在 `zf_device_wireless_uart.h`：`WIRELESS_UART_RX_PIN=UART1_TX_B6`，`WIRELESS_UART_TX_PIN=UART1_RX_B7`（命名：宏指「接模块 TX/RX 的 MCU 侧」）。恢复无线前必须先解决 B7。
+| **B7** | 已给右编码器；无线 UART1 RX 同脚，**无线未 init** |
+| **SPI0** | 已给 IPS200；WiFi SPI 同总线，**未启用** |
+| **A14** | 已给 LED；勿再叠 UART3_TX 等业务 |
 
 ---
 
-## 6. 传感器与显示（库默认，启用前核对）
+## 4. 模块接线摘要
 
-### 6.1 IMU963RA（本工程 `imu_init` 使用）
+### 4.1 电机 + 编码器 + 底盘
 
-| 信号 | 配置 |
+| 轮 | PWM | DIR | 编码器 | 定时器 |
+|----|-----|-----|--------|--------|
+| 左 | B10 | B11 | A26/A27 | TIM_G0 + TIM_G8 |
+| 右 | B12 | B13 | B7/B9 | TIM_A0 + TIM_G9 |
+
+- 源码：`motor.*` / `encoder.*` / `chassis.*`
+- 命令 mask：`bit0=左`，`bit1=右`
+- 上电默认 `CHASSIS_MODE_IDLE`；串口：`chassis status` / `chassis openloop ...`
+- 方向反了只改 `polarity`，勿乱换左右脚
+
+### 4.2 通信（仅 UART0）
+
+| 通道 | 外设 | 引脚 | 用途 |
+|------|------|------|------|
+| 命令 + 日志 | UART0 | A10/A11 | `sys_log_init(SYS_LOG_UART)` + `cmd_service` |
+
+### 4.3 IMU / 屏 / 按键
+
+| 模块 | 要点 |
 |------|------|
-| 接口 | SPI1，约 8 MHz |
-| SCK | B23 (`SPI1_SCK_B23`) |
-| MOSI | B22 |
-| MISO | B21 |
-| CS | B19 |
-
-同组脚也用于 660RA/RB/RC 等模块，**主板 IMU 座固定时勿改**。
-
-### 6.2 显示屏 IPS200（**已启用** `gui_app_init`）
-
-| 信号 | 引脚 |
-|------|------|
-| SCK | A12 (`SPI0`) |
-| MOSI | A9 |
-| RST | A7 |
-| DC | A15 |
-| CS | A8 |
-| BLK | A13 |
-
-- 入口：`project/code/service/gui/gui_app.c` → `mjc_init` / `mjc_hal`（默认竖屏 240×320）。
-- 与 WiFi SPI 共用 SPI0 数据线；**WiFi 保持暂关**。
-- 刷新：100ms soft_timer `mjc_update`；按键扫描 5ms。
-
-### 6.3 GUI 按键（主板板载键，已与电机共存）
-
-| UI 键 | 引脚 | 说明 |
-|-------|------|------|
-| UP | **A30** | 上移 / 编辑 − |
-| DOWN | **A31** | 下移 / 编辑 + |
-| MAIN | **B0** | 进入 / 确认 |
-| AUX | **B1** | 返回 / 取消 |
-
-- 源码：`mjc_input_button.c` 的 `s_button_pins`；与 `zf_device_key.h` 的 `KEY_LIST {A30,A31,B0,B1}` 及主板丝印一致。
-- 电平：上拉输入，**低电平有效**（`MJC_BUTTON_ACTIVE_LEVEL=0`）。
-- 旧例程脚 B13/B12/B14/B15 **已废弃**，勿再使用。
-- 菜单：根页 Chassis / Save Params；Chassis 下 Stop、IDLE。
+| IMU | SPI1 @ ~8 MHz；脚见 §1 |
+| IPS200 | `gui_app` → MujicaUI；竖屏 240×320；100 ms 刷新 |
+| 按键 | 上拉、低有效；`mjc_input_button.c` 与 `KEY_LIST` 一致 |
 
 ---
 
-## 7. 软件定时与中断节拍（非引脚，但属“硬件节拍”）
+## 5. 软件节拍
 
-硬件 PIT 只做 1ms 时间基准；业务用 soft_timer：
+PIT 仅提供 1 ms；业务 soft_timer：
 
 | 周期 | 任务 |
 |------|------|
 | 1 ms | `imu_update` |
 | 2 ms | `encoder_update` + `motor_update` |
-| 5 ms | `mjc_buttons_tick_5ms`（GUI 按键） |
+| 5 ms | GUI 按键 |
 | 10 ms | `chassis_update` |
 | 20 ms | `cmd_service_task` |
-| 100 ms | `mjc_update`（GUI 刷新） |
-| 500 ms | LED 心跳 `gpio_toggle_level(A14)` |
+| 100 ms | GUI 刷新 |
+| 500 ms | LED 心跳 |
 
 主循环：`soft_timer_process()` + `event_process_async()`。
 
 ---
 
-## 8. 修改硬件配置的检查清单
+## 6. 改脚检查清单
 
-改任何引脚 / 定时器前按顺序执行：
-
-1. **读本文件** §1–3，确认目标脚空闲、**不在 §3.2 慎用表（A19/A20/A5/A6/A4/A3）**、无总线冲突。  
-2. 查逐飞库枚举：`zf_driver_*.h` 中是否存在该 `PWM_TIM_*` / `UARTx_*` / `encoder` 复用组合。  
-3. 改对应模块宏（§ 文首表格中的源文件）。  
-4. **同步更新本文件** §1、§2、§3 及冲突表。  
-5. 更新 `main.c` 顶部资源注释（与本文保持一致）。  
-6. 若动 UART/定时器向量：检查 `project/user/src/isr.c`。  
-7. 全量编译；上电自检 LED / 串口 / 编码器计数 / 电机点动。
+1. 读本文 §1–3，确认目标脚空闲且不与上表冲突  
+2. 查 `project/尽量不要使用的引脚.txt` 与 `motherboard_3507_pinout.md`（丝印/慎用脚）  
+3. 查逐飞库是否存在目标 `PWM_TIM_*` / `UART*` / 正交脚组合  
+4. 改对应模块宏 → **回写本文** → 同步 `main.c` 资源注释  
+5. 动 UART/定时器向量时查 `isr.c`  
+6. 编译 + 上电自检：LED / 串口 / 编码器 / 电机点动  
 
 ---
 
-## 9. 变更记录
+## 7. 变更记录
 
 | 日期 | 变更 |
 |------|------|
-| 2026-07-19 | **左电机迁 M4 同组**：PWM **B10(TIM_G0)** + DIR **B11**；右仍 M2 B12/B13；释放 B8 |
-| 2026-07-19 | **有刷电机座分组**：M1=B8/B9、M2=B12/B13、M3=A27/A26、M4=B11/B10（每组 PWM+DIR）；同步 `motherboard_3507_pinout.md` |
-| 2026-07-19 | **左电机改主板电机座**：PWM/DIR **A0/A1 → B8/B10**；右仍 B12/B13；释放 ToF 的 A0/A1 |
-| 2026-07-19 | **启用 GUI**：`gui_app_init`（IPS200 SPI0 + 按键 A30/A31/B0/B1；5ms/100ms soft_timer） |
-| 2026-07-19 | **GUI 按键改主板** A30/A31/B0/B1；消除与右电机 B12/B13 冲突；补充主板电机座 PWM 备选（B8/B10/B11） |
-| 2026-07-19 | **启用底盘/电机/编码器**；**无线 UART1 暂关**（B7→右编码器）；命令/日志仅 UART0 |
-| 2026-07-19 | **重点写入**官方「尽量不要使用的引脚」：A19/A20/A5/A6/A4/A3（E01_gpio_demo 原文）+ A14 LED 保留；强制规则与改脚清单同步 |
-| 2026-07-18 | 初版：汇总电机/正交编码器/PIT/UART/LED/IMU/WiFi 及冲突策略 |
-| 2026-07-18 | 编码器由方向模式(G6/G7)改为正交(G8/G9, A26/A27, B7/B9) |
-| 2026-07-18 | 命令/日志改无线串口 B6/B7/B2；WiFi SPI 停用；电机/编码器/底盘暂关（B7 冲突） |
-| 2026-07-18 | 增加 A14 LED soft_timer 心跳（优先于 UART3_TX） |
-| 2026-07-18 | 禁用命令 UART3；命令仅 WiFi SPI + Debug UART0；A13 专供 WiFi MISO |
+| 2026-07-19 | 文档职责收敛：本文仅保留**已启用**资源；丝印/慎用脚全文迁出 |
+| 2026-07-19 | 左电机 M4（B10 TIM_G0 + B11）；右 M2（B12/B13）；底盘/编码器启用；无线关 |
+| 2026-07-19 | GUI IPS200 + 按键 A30/A31/B0/B1；命令/日志仅 UART0 |
+| 2026-07-18 | 初版与正交编码器、UART/LED 等策略 |
 
 ---
 
-## 10. 相关文档
+## 8. 相关文档
 
-- **`docs/motherboard_3507_pinout.md`** — **3507 主板引脚原图修正表**（现用底板；无 3519 主板）  
-- `docs/MSPM0G3507_vs_MSPM0G3519.md` — 芯片与资源差异  
-- `docs/PORTING_NOTES.md` — 从 3507 工程移植步骤  
-- `CLAUDE.md` — 工程总览（**软件已启用资源**以本文为准；**主板丝印**以 `motherboard_3507_pinout.md` 为准）  
-- **官方慎用脚原文**：`MSPM0G3519_Library-master\Example\Coreboard_Demo\E01_gpio_demo\尽量不要使用的引脚.txt`  
-- 工程副本：`project/尽量不要使用的引脚.txt`（含 A14 说明）  
-)
+| 文档 | 职责 |
+|------|------|
+| [`motherboard_3507_pinout.md`](motherboard_3507_pinout.md) | 3507 主板丝印 / 可接外设全集 / 电机座分组 |
+| [`MSPM0G3507_vs_MSPM0G3519.md`](MSPM0G3507_vs_MSPM0G3519.md) | 芯片规格与库差异 |
+| [`PORTING_NOTES.md`](PORTING_NOTES.md) | 从 3507 移植步骤（历史） |
+| [`../CLAUDE.md`](../CLAUDE.md) | Agent / 工程导读 |
+| `project/尽量不要使用的引脚.txt` | 核心板慎用脚官方列表副本 |

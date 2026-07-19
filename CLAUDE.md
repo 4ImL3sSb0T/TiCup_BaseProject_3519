@@ -7,12 +7,15 @@ This file provides guidance when working with code in this repository.
 TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProject`（MSPM0G3507）移植而来。  
 使用 **逐飞科技 SEEKFREE 开源库** + TI DriverLib。
 
-芯片对比与移植说明见：
+## 文档职责（改脚前必读）
 
-- **`docs/hardware.md`（软件已占用资源必读，改脚前必须查阅并回写）**
-- **`docs/motherboard_3507_pinout.md`（现用 3507 主板丝印/全引脚表；尚无 3519 主板）**
-- `docs/MSPM0G3507_vs_MSPM0G3519.md`
-- `docs/PORTING_NOTES.md`
+| 文档 | 职责 |
+|------|------|
+| **`docs/hardware.md`** | **固件已启用** 的引脚/定时器/通道（改脚必改此文） |
+| **`docs/motherboard_3507_pinout.md`** | 3507 主板丝印 / 可接外设全集（尚无 3519 主板） |
+| `docs/MSPM0G3507_vs_MSPM0G3519.md` | 芯片规格与库差异 |
+| `docs/PORTING_NOTES.md` | 从 3507 移植步骤（历史） |
+| `project/尽量不要使用的引脚.txt` | 核心板慎用脚官方列表副本 |
 
 ## Build
 
@@ -35,22 +38,9 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 3. `pit_ms_init(PIT_TIM_G12, 1, ...)` 系统 1ms
 4. soft_timer：imu 1ms / motion 2ms / **GUI 按键 5ms** / chassis 10ms / cmd 20ms / **GUI 刷新 100ms** / LED 500ms + `event_process_async()` 主循环
 
-### Hardware (current)
+### Hardware（摘要）
 
-完整占用表、冲突与改脚检查清单见 **`docs/hardware.md`**（唯一权威硬件文档）。
-
-| 功能 | 资源 |
-|------|------|
-| 电机/编码器/底盘 | **已启用**（右编码器 B7/B9；无线暂关） |
-| 1ms 节拍 | PIT_TIM_G12 |
-| LED | A14（500ms 心跳） |
-| 命令/日志 | **UART0（A10/A11）**；无线 UART1 暂关；WiFi SPI 暂不可用 |
-| IMU | SPI1：B23/B22/B21 + CS B19 |
-| GUI | IPS200 SPI0（A12/A9/A7/A15/A8/A13）+ 按键 A30/A31/B0/B1 |
-| 参数持久化 | LittleFS `/param.txt`（key=value），DATA Flash via `bsp_flash`（非 MAIN `storage`） |
-
-**尽量不要使用的引脚（核心板官方 · 重点）**：**A19、A20、A5、A6、A4、A3**（特殊功能脚，占用可能导致核心板异常）；**A14** 优先留给板载 LED。  
-来源：`MSPM0G3519_Library-master\Example\Coreboard_Demo\E01_gpio_demo\尽量不要使用的引脚.txt`；工程约定见 `docs/hardware.md` §3.2。
+完整占用表见 **`docs/hardware.md`**。当前大致：电机+编码器+底盘已启用；命令/日志 **UART0**；无线/WiFi 未开；IMU SPI1；GUI IPS200 SPI0 + 按键 A30/A31/B0/B1；参数 LFS `/param.txt`。
 
 ## 3519 注意
 

@@ -1,7 +1,11 @@
-# MSPM0G3507 与 MSPM0G3519 对比文档
+# MSPM0G3507 与 MSPM0G3519 对比
 
-> 对应工程：`BaseProject`（3507）与 `BaseProject_3519`（3519）  
-> 更新日期：2026-07-18
+> **职责（仅此）**  
+> 两颗芯片的规格、外设枚举与工程/库差异。  
+> **不写** 本仓库当前接线与已启用外设——见 **`docs/hardware.md`**。  
+> 更新日期：2026-07-19
+
+对应工程：`BaseProject`（3507）与 `BaseProject_3519`（3519）。
 
 ---
 
@@ -64,7 +68,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 // 官方注释：原 UART2 引脚可用 UART7 兼容
 ```
 
-本工程命令入口当前为 **WiFi SPI + Debug UART0**；**UART3（A14/A13）暂禁用**（两端芯片均有 UART3，恢复时改 `cmd_service` 即可）。
+本工程实际命令/日志通道：见 **`docs/hardware.md`**。
 
 ---
 
@@ -78,13 +82,10 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 | DMA | 7 通道 | **12 通道** |
 | 看门狗 | 2× WWDT | 2× WWDT + **IWDT** |
 
-### 本工程 PIT 映射
+### PIT 枚举注意（3519）
 
-| 用途 | 使用的定时器 | 说明 |
-|------|--------------|------|
-| 电机 PWM | TIM_A0 | 两端一致 |
-| 左/右编码器 | TIM_G8 / TIM_G9（正交） | 两端一致 |
-| 1ms 系统节拍 | **PIT_TIM_G12** | 3519 中 PIT 枚举含 G9/G12/G14，G12 下标为 7 |
+3519 的 PIT 枚举含 `PIT_TIM_G9`、`PIT_TIM_G12`、`PIT_TIM_G14` 等，**使用枚举名，勿写死数字下标**。  
+本工程 1 ms 节拍用哪个定时器：见 **`docs/hardware.md`**。
 
 ---
 
@@ -111,12 +112,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 | GPIO | 最多约 60，GPIOA/B | 最多约 **94**，**GPIOA/B/C** |
 | 典型封装 | 28/32/48/64 | 32/48/64/**80/100** |
 
-### 尽量不要使用的引脚（3519 核心板）
-
-见 `project/尽量不要使用的引脚.txt`：
-
-- 特殊功能：`A19, A20, A5, A6, A4, A3`
-- **A14**：核心板 LED（命令 UART3 已禁用，不再与 LED 抢 TX）
+核心板慎用脚（3519）：见 `project/尽量不要使用的引脚.txt`（A19/A20/A5/A6/A4/A3；A14 为板载 LED）。
 
 ---
 
@@ -143,19 +139,7 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 | SysCtl | `dl_sysctl_mspm0g1x0x_g3x0x` | `dl_sysctl_mspm0gx51x` |
 | libraries | 3507 逐飞库 | **3519 逐飞库（不可混用）** |
 
-### 本工程硬件资源（移植后保持）
-
-| 资源 | 配置 |
-|------|------|
-| 电机左 | DIR=`B11`，PWM=`PWM_TIM_G0_CH0_B10`（主板电机座 **M4**） |
-| 电机右 | DIR=`B13`，PWM=`PWM_TIM_A0_CH2_B12`（主板电机座 **M2**） |
-| 编码器左 | TIM_G8，CH1=`A26`，CH2=`A27`（正交） |
-| 编码器右 | TIM_G9，CH1=`B7`，CH2=`B9`（正交） |
-| 系统 1ms | `PIT_TIM_G12` |
-| 调试串口 | UART0（A10/A11） |
-| 命令入口 | WiFi SPI + UART0（UART3 暂禁用） |
-
-与逐飞 3519 主板电机/编码器例程引脚一致，无需为换芯改脚（除非板级丝印不同）。
+接线与已启用外设：见 **`docs/hardware.md`**。主板丝印：见 **`docs/motherboard_3507_pinout.md`**。
 
 ---
 
@@ -163,14 +147,16 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 
 从 3507 工程迁到 3519 时按此核对：
 
-1. **只用 3519 的 `libraries/`**，不要拷 3507 的 SDK/driver
-2. **搜索 `UART_2` / `UART2`** → 改为 `UART_7`（及对应引脚宏）
-3. **PIT 枚举**：3519 多了 `PIT_TIM_G9`、`PIT_TIM_G14`，`PIT_TIM_G12` 序号变化，使用枚举名不要写死数字下标
-4. **isr.c** 必须使用 3519 向量（无 UART2，有 UART4–7 / TIMG9/14）
-5. **链接脚本** 使用 512KB Flash / 128KB RAM
-6. **Keil 设备包** 使用 `MSPM0GX51X_DFP`，宏 `__MSPM0G3519__`
-7. 新增 `project/code` 文件后必须在 `.uvprojx` 的 `code` 组中添加
-8. 工程移动路径后执行 **Project → Clean** 再全量编译
+1. **只用 3519 的 `libraries/`**，不要拷 3507 的 SDK/driver  
+2. **搜索 `UART_2` / `UART2`** → 改为 `UART_7`（及对应引脚宏）  
+3. **PIT 枚举**：3519 多了 `PIT_TIM_G9`、`PIT_TIM_G14`，使用枚举名不要写死数字下标  
+4. **isr.c** 必须使用 3519 向量（无 UART2，有 UART4–7 / TIMG9/14）  
+5. **链接脚本** 使用 512KB Flash / 128KB RAM  
+6. **Keil 设备包** 使用 `MSPM0GX51X_DFP`，宏 `__MSPM0G3519__`  
+7. 新增 `project/code` 文件后必须在 `.uvprojx` 的 `code` 组中添加  
+8. 工程移动路径后执行 **Project → Clean** 再全量编译  
+
+步骤细节与历史记录：见 **`docs/PORTING_NOTES.md`**。
 
 ---
 

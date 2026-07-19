@@ -2,29 +2,28 @@
 
 ## 概述
 
-命令服务负责从多个输入源接收文本命令，按行切分后交给解析器执行，并输出统一 ACK。
+命令服务负责从输入源接收文本命令，按行切分后交给解析器执行，并输出统一 ACK。
 
-- 位置: `project/code/module/communication/`
-- 关键文件:
+- 位置: `project/code/service/com/`
+- 相关文件:
   - `cmd_service.c/.h`: 输入聚合、分行、调度、ACK 发射
   - `parser.c` + `parse.h`: 命令分词、命令表匹配、处理函数分发
   - `param.c/.h`: `set/get/show/export/save/load` 参数系统（LFS `/param.txt` key=value）
+
+引脚与通道占用：见 **`docs/hardware.md`**（本文只写协议与软件行为）。
 
 ## 主要事项
 
 ### 1) 输入源与调度
 
-当前支持 2 路输入源:
+**当前固件主输入：** Debug 串口环形缓冲（**UART0**）。
 
-- WiFi SPI
-- Debug 串口环形缓冲（UART0）
-
-（UART3 暂禁用，避免与 A14 LED / A13 WiFi MISO 冲突。）
+代码中仍保留 WiFi SPI / 无线等通道宏，是否启用以 `hardware.md` 与 `cmd_service` 编译开关为准（现状：无线关、WiFi 未用）。
 
 调度方式:
 
-- `cmd_service_init()` 初始化各通道 FIFO（不初始化 UART3）
-- `cmd_service_task()` 周期运行（当前工程由 soft timer 每 20ms 触发）
+- `cmd_service_init()` 初始化各通道 FIFO
+- `cmd_service_task()` 周期运行（soft timer 每 20ms）
 
 ### 2) 命令帧协议（行协议）
 
@@ -73,8 +72,8 @@ navigator status\n
 
 ### 1) 输入轮询模型
 
-WiFi SPI 与 Debug UART0 均由 `cmd_service_task` 轮询读入各自 FIFO，再按行解析。
-（若日后恢复 UART 中断接收通道，需在任务侧对对应 IRQ 做短临界区保护 FIFO。）
+`cmd_service_task` 轮询各已启用通道 FIFO，再按行解析。  
+（若日后恢复 UART 中断接收，需在任务侧对对应 IRQ 做短临界区保护 FIFO。）
 
 ### 2) 长命令保护
 
@@ -117,7 +116,7 @@ WiFi SPI 与 Debug UART0 均由 `cmd_service_task` 轮询读入各自 FIFO，再
 1. 实现 handler: `cmd_exec_result_t xxx_handler(i32 seq, int argc, char **argv)`
 2. 在 `parser.c` 的 `command_list[]` 注册命令名与 handler
 3. 若需可调参数，接入 `param.c` 的参数注册与存储体系
-4. 通过串口/WiFi 发送命令验证 ACK 与返回码
+4. 通过串口发送命令验证 ACK 与返回码
 
 ## 联调检查清单
 
@@ -129,8 +128,5 @@ WiFi SPI 与 Debug UART0 均由 `cmd_service_task` 轮询读入各自 FIFO，再
 
 ## 相关文档
 
-- [主项目文档](../../../../AGENTS.md)
-- [Navigator 文档](../../algorithm/navigator/README.md)
+- [硬件已启用资源](../../../../docs/hardware.md)
 - [事件系统](../../common/event/README.md)
-- [应用层代码入口](../../application/mode_sokoban/)
-
