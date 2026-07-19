@@ -106,6 +106,9 @@ exit_code_t motor_init(void)
         motor_init_single(motor_list[i]);
     }
 
+    /* 立即 duty=0 + 按 dir_reverse 写 DIR，避免仅 gpio_init(DIR,HIGH) 悬到 motor_update */
+    (void)motor_stop_all();
+
     sys_log_text(info, "Motor: L=M4 PWM B10(TIM_G0)+DIR B11, R=M2 PWM B12+DIR B13");
     return EXIT_OK;
 }

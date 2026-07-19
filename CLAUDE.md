@@ -44,7 +44,7 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 ### Boot flow
 
 1. `clock_init(SYSTEM_CLOCK_80M)` + `debug_init()`
-2. event / soft_timer / log(UART0) / **fs_init (LFS)** / param_init / cmd / **motor+encoder** / imu / **chassis** / **param_load** / **gui_app**
+2. event / soft_timer / log(UART0) / param_init / **motor+encoder（fs 前，尽早 PWM=0）** / **fs_init (LFS)** / cmd / imu / **chassis** / **param_load** / **gui_app**
 3. `pit_ms_init(PIT_TIM_G12, 1, ...)` 系统 1ms
 4. soft_timer：imu 1ms / motion 2ms / **GUI 按键 5ms** / chassis 10ms / cmd 20ms / **GUI 刷新 100ms** / LED 500ms + `event_process_async()` 主循环
 

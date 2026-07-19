@@ -122,14 +122,17 @@ static void app_init(void)
 {
     /*
      * 初始化顺序（按依赖）：
-     *   clock/debug/dwt → log → event → soft_timer → fs → param → cmd
-     *   → motor(+encoder) → imu → chassis → param_load → GUI → 节拍与周期任务
+     *   clock/debug/dwt → log → event → soft_timer → param
+     *   → motor(+encoder)【尽早，fs/GUI 之前把 PWM 置 0】
+     *   → fs → cmd → LED → imu → chassis → param_load → GUI → 节拍
      *
      * 注意：
      *   - event_init() 内会调 sys_log_text；log 须先 init。
      *   - soft_timer 创建/启动依赖 event。
+     *   - motor 仅依赖 clock + log + param_init（param_add）；不依赖 fs。
+     *   - fs 可能较慢（mount/format），故放在 motor 之后，缩短电机脚悬空时间。
+     *   - param_load 须在全部 param_add（motor/chassis）且 fs 就绪之后。
      *   - 当前 SYS_LOG_UART：不 init 无线，B7 留给右编码器。
-     *   - param_load 须在全部 param_add（motor/chassis）之后。
      *   - GUI 占用 SPI0 屏脚；WiFi SPI 仍暂关。
      */
     /* 1. 基础时钟 / 调试串口 / 周期计数 */
@@ -147,34 +150,34 @@ static void app_init(void)
     /* 4. 软件定时器 */
     soft_timer_init();
 
-    /* 5. LittleFS（DATA Flash）— 须在 param 持久化之前 */
-    if (fs_init() != EXIT_OK) {
-        sys_log_text(error, "fs_init failed");
-    } else {
-        sys_log_text(info, "fs_init ok");
-    }
-
-    /* 6. 参数注册表（不 load；业务 param_add 完成后再 load） */
+    /* 5. 参数注册表（不 load；业务 param_add 完成后再 load） */
     if (param_init() != EXIT_OK) {
         sys_log_text(error, "param_init failed");
     } else {
         sys_log_text(info, "param_init ok");
     }
 
-    /* 7. 命令服务（仅 Debug UART0；无线暂关） */
-    cmd_service_init();
-    sys_log_text(info, "cmd_service_init ok (debug UART0 only, wireless off)");
-
-    /* 8. 核心板 LED（A14） */
-    gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
-    sys_log_text(info, "LED heartbeat on A14");
-
-    /* 9. 双电机 + 双编码器（DRV8701 + 正交；右编码器 B7/B9） */
+    /* 6. 双电机 + 双编码器（尽早：fs/IMU/GUI 之前把 PWM 强制 0） */
     if (motor_init() != EXIT_OK) {
         sys_log_text(error, "motor_init failed");
     } else {
         sys_log_text(info, "motor_init ok");
     }
+
+    /* 7. LittleFS（DATA Flash）— 可能较慢；须在 param_load 之前 */
+    if (fs_init() != EXIT_OK) {
+        sys_log_text(error, "fs_init failed");
+    } else {
+        sys_log_text(info, "fs_init ok");
+    }
+
+    /* 8. 命令服务（仅 Debug UART0；无线暂关） */
+    cmd_service_init();
+    sys_log_text(info, "cmd_service_init ok (debug UART0 only, wireless off)");
+
+    /* 9. 核心板 LED（A14） */
+    gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
+    sys_log_text(info, "LED heartbeat on A14");
 
     /* 10. IMU（6 轴，无磁力计） */
     {
