@@ -19,6 +19,7 @@
 #include "common/event/soft_timer.h"
 #include "service/sys/sys_log.h"
 #include "service/sys/sys_time.h"
+#include "service/fs/fs_service.h"
 #include "service/com/param.h"
 #include "service/com/cmd_service.h"
 #include "service/imu/imu.h"
@@ -116,29 +117,36 @@ static void app_init(void)
     /* 4. 软件定时器（依赖 event） */
     soft_timer_init();
 
-    /* 5. 参数系统（Flash 持久化暂未启用） */
+    /* 5. LittleFS（DATA Flash）— 须在 param 持久化之前 */
+    if (fs_init() != EXIT_OK) {
+        sys_log_text(error, "fs_init failed");
+    } else {
+        sys_log_text(info, "fs_init ok");
+    }
+
+    /* 6. 参数注册表（不 load；业务 param_add 完成后再 load） */
     if (param_init() != EXIT_OK) {
         sys_log_text(error, "param_init failed");
     } else {
         sys_log_text(info, "param_init ok");
     }
 
-    /* 6. 命令服务（无线串口 + Debug UART0；无线由 log 已 init） */
+    /* 7. 命令服务（无线串口 + Debug UART0；无线由 log 已 init） */
     cmd_service_init();
     sys_log_text(info, "cmd_service_init ok (wireless B6/B7 + debug UART0)");
 
-    /* 7. 核心板 LED（A14） */
+    /* 8. 核心板 LED（A14） */
     gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
     sys_log_text(info, "LED heartbeat on A14");
 
     /*
      * 电机 / 编码器 / 底盘 —— 暂关闭
      * 原因：右编码器 CH1 占用 B7，与无线串口 RX 冲突；WiFi SPI 当前不可用。
-     * 恢复时：改编码器脚或改通信脚，并同步 docs/hardware.md。
+     * 恢复时：改编码器脚或改通信脚，并同步 docs/hardware.md；init 内会 param_add。
      */
     sys_log_text(info, "motor/encoder/chassis: DISABLED (B7 -> wireless RX)");
 
-    /* 8. IMU（6 轴，无磁力计；init 路径会打日志） */
+    /* 9. IMU（6 轴，无磁力计；init 路径会打日志） */
     {
         exit_code_t imu_ret = imu_init(imu_mode_no_mag);
         if (imu_ret != EXIT_OK) {
@@ -148,19 +156,24 @@ static void app_init(void)
         }
     }
 
-    /* 9. 1ms 系统节拍（驱动 soft_timer 的 sys_time_ms） */
+    /* 10. 全部 param_add 完成后从 LFS /param.txt 恢复（无文件则用默认） */
+    if (param_load("boot") != 0) {
+        sys_log_text(warning, "param_load boot failed (using defaults)");
+    }
+
+    /* 11. 1ms 系统节拍（驱动 soft_timer 的 sys_time_ms） */
     pit_ms_init(SYS_TICK_PIT, 1, pit_1ms_callback, NULL);
     sys_log_text(info, "sys tick 1ms on PIT_G12");
 
-    /* 10. 周期任务（依赖 soft_timer + event） */
+    /* 12. 周期任务（依赖 soft_timer + event） */
     (void)app_start_timer(CMD_POLL_INTERVAL_MS, cmd_service_task, "cmd");
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
-    /* 11. 开全局中断 */
+    /* 13. 开全局中断 */
     interrupt_global_enable(0);
 
-    sys_log_text(info, "init done. LED 500ms. try: help (via wireless or UART0)");
+    sys_log_text(info, "init done. LED 500ms. try: help / show / export / save (wireless or UART0)");
 }
 
 int main(void)

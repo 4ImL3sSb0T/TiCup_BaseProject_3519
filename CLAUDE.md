@@ -31,7 +31,7 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 ### Boot flow
 
 1. `clock_init(SYSTEM_CLOCK_80M)` + `debug_init()`
-2. event / soft_timer / log / param / cmd / motor / imu / chassis
+2. event / soft_timer / log / **fs_init (LFS)** / param_init / cmd / (motor 暂关) / imu / **param_load**
 3. `pit_ms_init(PIT_TIM_G12, 1, ...)` 系统 1ms
 4. soft_timer 周期任务 + `event_process_async()` 主循环
 
@@ -47,6 +47,7 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 | 调试 | UART0（A10/A11） |
 | 命令/日志 | **无线串口 UART1：B6 TX / B7 RX / B2 RTS** + UART0（WiFi SPI 暂不可用） |
 | IMU | SPI1：B23/B22/B21 + CS B19 |
+| 参数持久化 | LittleFS `/param.txt`（key=value），DATA Flash via `bsp_flash`（非 MAIN `storage`） |
 
 **尽量不要使用的引脚（核心板官方 · 重点）**：**A19、A20、A5、A6、A4、A3**（特殊功能脚，占用可能导致核心板异常）；**A14** 优先留给板载 LED。  
 来源：`MSPM0G3519_Library-master\Example\Coreboard_Demo\E01_gpio_demo\尽量不要使用的引脚.txt`；工程约定见 `docs/hardware.md` §3.2。

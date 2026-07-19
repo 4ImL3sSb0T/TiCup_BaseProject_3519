@@ -8,7 +8,7 @@
 - 关键文件:
   - `cmd_service.c/.h`: 输入聚合、分行、调度、ACK 发射
   - `parser.c` + `parse.h`: 命令分词、命令表匹配、处理函数分发
-  - `param.c/.h`: `set/get/show/save/load` 参数系统
+  - `param.c/.h`: `set/get/show/export/save/load` 参数系统（LFS `/param.txt` key=value）
 
 ## 主要事项
 
@@ -95,7 +95,11 @@ WiFi SPI 与 Debug UART0 均由 `cmd_service_task` 轮询读入各自 FIFO，再
 
 ## 当前内置命令族（见 `parser.c`）
 
-- 参数命令: `set/get/show/save/load`
+- 参数命令: `set/get/show/export/save/load`
+  - 运行时改查：`set` / `get` / `show [prefix]`（内存注册表）
+  - 备份可读文本：`export`（打印 key=value，不写 Flash）
+  - 持久化：`save` / `load` → LittleFS 文件 `/param.txt`（DATA Flash，经 `fs_service`）
+  - 启动顺序：`fs_init` → `param_init` → 各模块 `param_add` → `param_load`
 - 帮助命令: `help`
 - 运动相关: `chassis`, `motor`
 - 状态估计: `set_position`, `estimator`

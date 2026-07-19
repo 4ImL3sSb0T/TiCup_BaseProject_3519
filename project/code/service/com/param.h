@@ -31,10 +31,13 @@ typedef struct param_t
     void* data;
     param_type_t type;
     char name[PARAM_NAME_MAX_LEN];
-    bool need_storage;  // 是否需要Flash持久化存储
+    bool need_storage;  // 是否写入 LFS /param.txt
 } param_t;
 
-// 初始化参数系统（会自动从Flash加载参数）
+/**
+ * @brief 初始化参数注册表（不 load）
+ * @note  须在 fs_init() 之后调用；业务 param_add 全部完成后再 param_load()
+ */
 exit_code_t param_init(void);
 
 // 参数管理接口
@@ -44,14 +47,19 @@ int param_get_by_index(uint16_t index, param_t* param);
 int param_get_value(const char* name, void* data);
 exit_code_t param_add(const char* name, param_type_t type, void* data, bool need_storage);
 
-// Flash 持久化接口（当前为桩实现，storage 未接入；调用会返回失败）
-int param_save(void);                        // 保存需要持久化的参数到Flash
-int param_load(const char* flash_tag);       // 从Flash加载参数
-int param_clear_flash(void);                 // 清除Flash中的参数数据
+/**
+ * LFS 文本持久化（/param.txt，key=value）
+ * - 仅任务上下文调用；禁止 ISR / 1ms 控制环
+ * - load 须在全部 param_add 之后
+ */
+int param_save(void);                        // 保存 need_storage 参数到 LFS
+int param_load(const char* flash_tag);       // 从 LFS 加载；无文件视为成功
+int param_clear_flash(void);                 // 删除 /param.txt
 
 // 命令行接口
 cmd_exec_result_t param_command_parse(i32 seq, int argc, char** argv);
 cmd_exec_result_t param_command_show(i32 seq, int argc, char** argv);
+cmd_exec_result_t param_command_export(i32 seq, int argc, char** argv);
 
 // ============================================================================
 // 便捷宏定义 - 自动使用变量名
@@ -61,7 +69,7 @@ cmd_exec_result_t param_command_show(i32 seq, int argc, char** argv);
  * @brief 添加参数，自动使用变量名作为参数名
  * @param var  变量名（会被转换为字符串作为参数名）
  * @param type 参数类型（PARAM_TYPE_UINT8, PARAM_TYPE_FLOAT 等）
- * @param need_storage 是否需要Flash持久化存储
+ * @param need_storage 是否需要 LFS 持久化
  * @return exit_code_t
  *
  * 示例:
@@ -90,7 +98,7 @@ cmd_exec_result_t param_command_show(i32 seq, int argc, char** argv);
  * @param var  变量名
  *
  * 示例:
- *   PARAM_GET(my_param);  // 从Flash/存储中恢复值到 my_param
+ *   PARAM_GET(my_param);
  */
 #define PARAM_GET(var) \
     param_get_value(#var, &(var))

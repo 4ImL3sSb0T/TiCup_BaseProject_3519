@@ -26,6 +26,7 @@ command_t command_list[] = {
     {"set", param_command_parse},
     {"get", param_command_parse},
     {"show", param_command_show},
+    {"export", param_command_export},
     {"save", param_command_parse},
     {"load", param_command_parse},
     {"motor", motor_command_handler},

@@ -625,6 +625,16 @@
               <FilePath>..\code\service\com\param.h</FilePath>
             </File>
             <File>
+              <FileName>fs_service.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\service\fs\fs_service.c</FilePath>
+            </File>
+            <File>
+              <FileName>fs_service.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\fs\fs_service.h</FilePath>
+            </File>
+            <File>
               <FileName>parse.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\code\service\com\parse.h</FilePath>

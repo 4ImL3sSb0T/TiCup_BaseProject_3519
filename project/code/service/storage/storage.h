@@ -5,19 +5,16 @@
 * 功能说明          Flash底层存储接口 - 提供Flash读写和CRC32校验功能
 * 作者              Jupiter Team
 * 创建日期          2025-12-13
-* 修改日期          2025-01-09
+* 修改日期          2026-03-22
 *
-* 使用说明：
+* @deprecated 参数持久化已改用 LittleFS（service/fs + DATA Flash /param.txt）。
+*             本模块基于 MAIN Flash 单页，勿再接入 param；仅保留源码备查。
+*             请使用：fs_init() + param_save/load。
+*
+* 使用说明（历史）：
 *   1. 提供Flash的底层读写接口，不涉及参数管理
 *   2. 支持CRC32数据完整性校验
-*   3. 由Param模块调用以实现参数持久化
-*
-* 示例代码：
-*   storage_init();                                          // 初始化Flash
-*   uint32 crc = storage_crc32(data, length);               // 计算CRC32
-*   storage_write_data(data, length);                        // 写入数据
-*   storage_read_data(buffer, length);                       // 读取数据
-*   storage_clear();                                         // 擦除Flash
+*   3. 曾由 Param 调用；当前 Keil 工程未编入
 ********************************************************************************************************************/
 
 #ifndef __STORAGE_H__

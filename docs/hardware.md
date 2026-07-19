@@ -26,6 +26,7 @@
 | 编码器 | `project/code/service/motion/encoder.h` |
 | 命令串口 | `project/code/service/com/cmd_service.c` |
 | 日志通道 | `project/code/service/sys/sys_log.c` / `sys_log.h` |
+| 参数 / LFS | `project/code/service/com/param.*`、`service/fs/fs_service.*`、`bsp/flash` |
 | 无线转串口 | `libraries/zf_device/zf_device_wireless_uart.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
 | IMU963RA | `libraries/zf_device/zf_device_imu963ra.h` |
@@ -52,6 +53,7 @@
 | 命令辅入口 | UART0 | A10/A11 | `debug_read_ring_buffer` | — |
 | ~~命令/日志 WiFi SPI~~ | SPI0 | — | **暂不可用**，勿接线依赖 | — |
 | IMU | SPI1 | B23/B22/B21 + CS B19 | IMU963RA 默认 SPI | E4_03_imu963ra |
+| 参数持久化 | LittleFS（片内 **DATA Flash**） | —（无 GPIO） | `/param.txt` key=value；`fs_service` + `bsp_flash`；**非** MAIN `storage` 扇区 | — |
 
 电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`。
 

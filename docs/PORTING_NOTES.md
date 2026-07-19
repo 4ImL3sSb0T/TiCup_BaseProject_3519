@@ -26,19 +26,20 @@
 
 ```text
 ==== BaseProject_3519 boot ====
+fs_init ok
 param_init ok
 cmd_service_init ok ...
-motor_init ok
 imu_init ok ...
-chassis_init ok
+param_load[boot]: ... (or file not found, using defaults)
 sys tick 1ms on PIT_G12
-init done. try: help / chassis status / motor 0x3 status
+init done. try: help / show / export / save
 ```
 
 命令通道：
 
-- Debug UART0 / WiFi（UART3 暂禁用）
-- 示例：`help`、`chassis status`、`motor 0x3 status`
+- 无线串口 UART1（B6/B7）+ Debug UART0
+- 示例：`help`、`show`、`export`、`set <name> <value>`、`save`、`load`
+- 参数落盘：LittleFS `/param.txt`（key=value 文本，DATA Flash 16 KB）
 
 ## 已知注意点
 
@@ -46,7 +47,8 @@ init done. try: help / chassis status / motor 0x3 status
 |----|------|
 | A14 | 核心板 LED；UART3 已禁用，见 `尽量不要使用的引脚.txt` |
 | 无 UART2 | 3519 硬件无 UART2；同脚位用 UART7 |
-| Flash 参数区 | `storage` 模块未加入当前 Keil 工程；启用时需按 3519 Flash 扇区重配 |
+| 参数持久化 | `fs_service` + LFS（DATA Flash）；旧 `storage`（MAIN 扇区）已废弃，勿再接入 param |
+| 电机/底盘 | 当前禁用（B7 无线 RX）；恢复后其 `param_add` 会自动参与 save/load |
 | GUI/按键 | `mjc_input_button` 引脚需按实板确认 |
 | 日志默认 | `main.c` 中 `sys_log_init(SYS_LOG_WIFI)` 与 3507 一致；无 WiFi 时可改为 `SYS_LOG_UART` |
 
