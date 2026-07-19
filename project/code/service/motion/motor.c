@@ -2,7 +2,7 @@
  * @file motor.c
  * @brief 双电机控制模块（DRV8701：DIR + PWM）
  *
- * 电机：MG310 霍尔；引脚：主板有刷电机座 — 左 B8/B10，右 B12/B13（TIM_A0）
+ * 电机：MG310 霍尔；引脚：主板有刷电机座 — 左 M4(B10 PWM/TIM_G0 + B11 DIR)，右 M2(B12/B13 TIM_A0)
  * 编码器：E2_01_encoder_quadrature_demo（正交）
  * 命令 mask: bit0=左电机, bit1=右电机
  */
@@ -106,7 +106,7 @@ exit_code_t motor_init(void)
         motor_init_single(motor_list[i]);
     }
 
-    sys_log_text(info, "Motor: L=PWM B8 + DIR B10, R=PWM B12 + DIR B13 (motherboard motor hdr)");
+    sys_log_text(info, "Motor: L=M4 PWM B10(TIM_G0)+DIR B11, R=M2 PWM B12+DIR B13");
     return EXIT_OK;
 }
 

@@ -63,12 +63,14 @@ extern "C" {
  * DRV8701 引脚（3507 主板「有刷电机」座，灰排线）
  *   座上 4 组，每组 1×PWM + 1×DIR（见 docs/motherboard_3507_pinout.md）：
  *     M1=B8/B9  M2=B12/B13  M3=A27/A26  M4=B11/B10
- *   本工程：左 B8 PWM + B10 DIR（跨 M1/M4，因 B9 给右编码器）；
- *           右 B12 PWM + B13 DIR（M2 同组）
- *   避开：B9 / A26 / A27（正交编码器）；B11 预留
+ *   本工程：
+ *     左 — M4 同组：B10 PWM + B11 DIR
+ *           （B10 无 TIM_A0 复用，用 TIM_G0 CH0；B8/B9 中 B9 给右编码器）
+ *     右 — M2 同组：B12 PWM + B13 DIR（TIM_A0 CH2）
+ *   避开：B8 空闲；B9 / A26 / A27（正交编码器）
  * -------------------------------------------------------------------------- */
-#define MOTOR_LEFT_PWM                      (PWM_TIM_A0_CH0_B8)
-#define MOTOR_LEFT_DIR                      (B10)
+#define MOTOR_LEFT_PWM                      (PWM_TIM_G0_CH0_B10)
+#define MOTOR_LEFT_DIR                      (B11)
 
 #define MOTOR_RIGHT_PWM                     (PWM_TIM_A0_CH2_B12)
 #define MOTOR_RIGHT_DIR                     (B13)
