@@ -7,15 +7,25 @@ This file provides guidance when working with code in this repository.
 TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProject`（MSPM0G3507）移植而来。  
 使用 **逐飞科技 SEEKFREE 开源库** + TI DriverLib。
 
-## 文档职责（改脚前必读）
+## 文档职责要点（Agent 必守）
 
-| 文档 | 职责 |
-|------|------|
-| **`docs/hardware.md`** | **固件已启用** 的引脚/定时器/通道（改脚必改此文） |
-| **`docs/motherboard_3507_pinout.md`** | 3507 主板丝印 / 可接外设全集（尚无 3519 主板） |
-| `docs/MSPM0G3507_vs_MSPM0G3519.md` | 芯片规格与库差异 |
-| `docs/PORTING_NOTES.md` | 从 3507 移植步骤（历史） |
-| `project/尽量不要使用的引脚.txt` | 核心板慎用脚官方列表副本 |
+| 文档 | 职责 | 不要写进该文档 |
+|------|------|----------------|
+| **`docs/hardware.md`** | **固件当前已启用** 的引脚 / 定时器 / 通道 / soft_timer | 主板丝印全集、未启用外设详表、芯片规格对比 |
+| **`docs/motherboard_3507_pinout.md`** | 3507 主板丝印、可接外设、共用总线、电机座 M1–M4 物理分组 | 固件实时占用表（链到 hardware） |
+| `docs/MSPM0G3507_vs_MSPM0G3519.md` | 3507 vs 3519 片内资源、库枚举、移植清单 | 本仓库当前接线 / 启用状态 |
+| `docs/PORTING_NOTES.md` | 从 3507 迁过来做了什么、编译自检 | 实时硬件占用（链到 hardware） |
+| `project/尽量不要使用的引脚.txt` | 核心板慎用脚官方列表副本 | 业务占用说明 |
+| `CLAUDE.md` / `AGENTS.md` | 工程导读、本文档职责、boot 摘要 | 完整引脚表（只摘要 + 链接） |
+| 模块 `README.md`（com/gui/…） | 该模块 API / 协议 / 用法 | 引脚占用现状（链到 hardware） |
+
+**规则：**
+
+1. 改脚 / 改外设 / 改定时器：**先读并回写 `docs/hardware.md`**，再改代码。
+2. 查丝印 / 能不能接某座：看 **`motherboard_3507_pinout.md`**，再对照 hardware 是否已被占。
+3. 慎用脚：`A19 A20 A5 A6 A4 A3` 尽量不用；`A14` 优先留给 LED → 见 `project/尽量不要使用的引脚.txt`。
+4. 禁止在多份文档里复制完整占用表；摘要可以，权威只在一处。
+5. 代码与文档冲突时：以 **`hardware.md` + 主板丝印** 为准，并同步回写。
 
 ## Build
 
