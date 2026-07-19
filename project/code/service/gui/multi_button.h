@@ -7,8 +7,7 @@
 #define _MULTI_BUTTON_H_
 
 #include <stdint.h>
-// #include <string.h>
-// #include "common/event/event.h"
+#include "common/event/event.h"
 
 // Configuration constants - can be modified according to your needs
 #define TICKS_INTERVAL          5    // ms - timer interrupt interval
@@ -16,6 +15,14 @@
 #define SHORT_TICKS             (300 / TICKS_INTERVAL)   // short press threshold
 #define LONG_TICKS              (1000 / TICKS_INTERVAL)  // long press threshold
 #define PRESS_REPEAT_MAX_NUM    15   // maximum repeat counter value
+
+/*
+ * Global button events: type = BUTTON_EVENT_BASE + ButtonEvent
+ * Range 0x0200.. avoids soft_timer TIMER_EVENT_BASE 0x0100..0x01FF.
+ * data = Button* (static lifetime); async queue stores pointer only.
+ */
+#define BUTTON_EVENT_BASE           0x0200u
+#define BUTTON_EVENT_DISPATCH_MODE  EVENT_DISPATCH_ASYNC
 
 // Forward declaration
 typedef struct _Button Button;

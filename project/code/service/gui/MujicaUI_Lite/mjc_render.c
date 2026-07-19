@@ -10,6 +10,7 @@
 #include <stdbool.h>
 
 #include "mjc_hal.h"
+#include "mjc_core.h"
 #include "service/sys/sys_log.h"
 #include "mjc_config.h"
 
@@ -45,7 +46,16 @@ static uint32_t mjc_render_item_hash(const mjc_item_t* item, uint8_t selected) {
         h ^= (uint32_t)(uintptr_t)item->data.submenu;
         break;
     case MJC_ITEM_TYPE_NUMBER:
-        if (item->data.number.value_ptr != NULL) {
+        if (mjc_is_edit_mode() && mjc_edit_get_item() == item) {
+            uint32_t bits = 0U;
+            float v = mjc_edit_get_value();
+            float st = mjc_edit_get_step();
+            memcpy(&bits, &v, sizeof(uint32_t));
+            h ^= bits;
+            memcpy(&bits, &st, sizeof(uint32_t));
+            h ^= bits;
+            h ^= 0x80000000U; /* edit-mode flag so UI refreshes on enter/exit */
+        } else if (item->data.number.value_ptr != NULL) {
             switch (item->data.number.num_type) {
             case MJC_NUM_INT8:
                 h ^= (uint32_t)(*(int8_t*)item->data.number.value_ptr);
@@ -205,6 +215,37 @@ uint8_t mjc_render_init(void) {
     return 1;
 }
 
+static void mjc_render_format_number_value(const mjc_number_config_t* number, float value,
+                                          char* buf, size_t len)
+{
+    if (buf == NULL || len == 0) {
+        return;
+    }
+    if (number == NULL) {
+        (void)snprintf(buf, len, "--");
+        return;
+    }
+
+    switch (number->num_type) {
+    case MJC_NUM_INT8:
+    case MJC_NUM_INT16:
+    case MJC_NUM_INT32:
+        (void)snprintf(buf, len, "%ld", (long)value);
+        break;
+    case MJC_NUM_UINT8:
+    case MJC_NUM_UINT16:
+    case MJC_NUM_UINT32:
+        (void)snprintf(buf, len, "%lu", (unsigned long)value);
+        break;
+    case MJC_NUM_FLOAT:
+        (void)snprintf(buf, len, "%.2f", (double)value);
+        break;
+    default:
+        (void)snprintf(buf, len, "--");
+        break;
+    }
+}
+
 static void mjc_render_format_number(const mjc_number_config_t* number, char* buf, size_t len) {
     if (buf == NULL || len == 0) {
         return;
@@ -267,7 +308,15 @@ static void mjc_render_format_value(const mjc_item_t* item, char* buf, size_t le
         (void)snprintf(buf, len, ">");
         break;
     case MJC_ITEM_TYPE_NUMBER:
-        mjc_render_format_number(&item->data.number, buf, len);
+        if (mjc_is_edit_mode() && mjc_edit_get_item() == item) {
+            /* Prefix '*' marks buffered edit (not yet committed). */
+            char num_buf[MJC_RENDER_VALUE_BUF];
+            mjc_render_format_number_value(&item->data.number, mjc_edit_get_value(),
+                                          num_buf, sizeof(num_buf));
+            (void)snprintf(buf, len, "*%s", num_buf);
+        } else {
+            mjc_render_format_number(&item->data.number, buf, len);
+        }
         break;
     default:
         buf[0] = '\0';

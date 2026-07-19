@@ -6,6 +6,7 @@
 #include "multi_button.h"
 #include <string.h>
 #include <stddef.h>
+#include "common/event/event.h"
 
 // Macro for callback execution with null check
 #define EVENT_CB(ev)   do { if(handle->cb[ev]) handle->cb[ev](handle); } while(0)
@@ -105,6 +106,14 @@ static inline void button_emit(Button* handle, ButtonEvent ev)
 {
         handle->event = (uint8_t)ev;
         EVENT_CB(ev);
+        /* Broadcast to event system for multi-page / multi-function handlers */
+        if (ev < BTN_EVENT_COUNT) {
+                (void)event_publish_ex(
+                        (event_type_t)(BUTTON_EVENT_BASE + (uint16_t)ev),
+                        handle,
+                        (uint16_t)sizeof(Button),
+                        BUTTON_EVENT_DISPATCH_MODE);
+        }
 }
 
 /**

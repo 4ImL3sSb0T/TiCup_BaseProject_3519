@@ -96,11 +96,28 @@ flowchart LR
 - 更改方向请在 `mjc_hal_init` 配置中设置 `display_dir`。驱动内部会同步更新 `width/height`。
 
 ## 按键输入（multi_button + 事件系统）
-- 新增按键适配位于 [project/code/module/gui/MujicaUI_Lite/mjc_input_button.c](project/code/module/gui/MujicaUI_Lite/mjc_input_button.c)，默认使用 C12/C13/C14/C15 四个按键，分别对应 上/下/确认/返回。
-- multi_button 事件通过 `event_publish_ex` 投递，适配层订阅 `BUTTON_EVENT_BASE + BTN_*`，并在回调中调用 `mjc_page_up/down`、进入子菜单或触发选中项。
+- 适配层：`project/code/service/gui/MujicaUI_Lite/mjc_input_button.c`
+- multi_button 在 `button_emit` 中 `event_publish_ex(BUTTON_EVENT_BASE + ev, Button*, ASYNC)`  
+  - **`BUTTON_EVENT_BASE = 0x0200`**（避开 soft_timer 的 `0x0100～0x01FF`）
+- mjc 默认订阅：`PRESS_DOWN` / `LONG_PRESS_HOLD` / `SINGLE_CLICK` / `DOUBLE_CLICK`
+- 业务可自行 `event_subscribe` 同一批事件；用 `mjc_input_set_enabled(0)` 关掉菜单消费，不关硬件广播
+
+### 键位与语义（默认）
+
+| 键 | 浏览 | NUMBER 编辑 |
+|----|------|-------------|
+| UP | 上移（按下/长按连发） | buffer −step；**双击 step÷10** |
+| DOWN | 下移 | buffer +step；**双击 step×10** |
+| MAIN | **仅单击**：进子菜单 / 切 checkbox / **进 NUMBER 编辑** / ACTION | **仅单击**：commit 缓冲 → `value_ptr`，发 `MJC_EVENT_CHANGE` |
+| AUX | **仅单击**：回父页 | **仅单击**：丢弃缓冲（不写 `value_ptr`） |
+
+- 编辑缓冲：过程中不改 `value_ptr`；值前显示 `*`
+- 会话 step 可双击改 decade，不永久改 `item->data.number.step`
+- 引脚默认 B13/B12/B14/B15 —— **B12/B13 与右电机冲突**，启用前须改脚（见 `docs/hardware.md`）
 
 ### 快速接入
-1. 先初始化事件系统与 UI：`event_init(); mjc_init(&root_page);`
-2. 调用 `mjc_buttons_init();`（内部会将 C12~C15 配置为上拉输入并注册 multi_button 句柄）。
-3. 在 5ms 周期（与 `TICKS_INTERVAL` 一致）调用 `mjc_buttons_tick_5ms();`；若 `BUTTON_EVENT_DISPATCH_MODE` 为异步，再在主循环调用 `event_process_async();`。
-4. 进入子菜单时自动压栈当前页面；返回按键会出栈恢复上一页面；确认键对非子菜单项调用 `mjc_item_execute(..., MJC_EVENT_TRIGGER)`。
+1. `event_init(); mjc_init(&root_page); mjc_buttons_init();`
+2. **5ms** soft_timer：`mjc_buttons_tick_5ms()`
+3. **100ms** soft_timer：`mjc_update()`（库内不绑 timer；snapshot 无变化则跳过重绘）
+4. 主循环：`soft_timer_process(); event_process_async();`
+5. 自定义全屏页抢键：`mjc_input_set_enabled(0);`，自行 subscribe；退出后 `mjc_input_set_enabled(1);`

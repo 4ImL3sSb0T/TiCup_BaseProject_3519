@@ -2,13 +2,18 @@
 
 ## 模块概览
 - 提供单键去抖与状态机，支持单击、双击、长按、长按保持与重复按压等事件。
-- 事件同时以回调形式触发，并按 `BUTTON_EVENT_BASE + event` 发布到通用事件系统，默认异步派发。
-- 关键实现位于 [project/code/module/gui/multi_button.c](project/code/module/gui/multi_button.c) 与 [project/code/module/gui/multi_button.h](project/code/module/gui/multi_button.h)。
+- 事件同时以 **本地回调** `button_attach` 与 **全局事件** 两种方式输出。
+- 全局：`event_publish_ex(BUTTON_EVENT_BASE + ButtonEvent, Button* handle, …, BUTTON_EVENT_DISPATCH_MODE)`  
+  - `BUTTON_EVENT_BASE = 0x0200`（**不要**用 0x0100，与 soft_timer 自动事件号冲突）  
+  - 默认 `BUTTON_EVENT_DISPATCH_MODE = EVENT_DISPATCH_ASYNC`  
+  - `data` 为静态存活的 `Button*`（异步队列只存指针）
+- 关键路径：`project/code/service/gui/multi_button.c` / `multi_button.h`
 
 ## 依赖与时间基准
-- 依赖通用事件系统头文件 `common/event/event.h`（若未使用事件系统，可仅用回调）。
-- 需要一个周期 `TICKS_INTERVAL=5ms` 的定时调用 `button_ticks()`，该周期与去抖/长按阈值计算直接相关。
-- 需提供硬件电平读取函数 `uint8_t read_level(uint8_t id)`，返回 GPIO 当前电平。
+- 依赖 `common/event/event.h`（发布全局事件时需要；也可只用 `button_attach` 回调）。
+- 需要周期 `TICKS_INTERVAL=5ms` 调用 `button_ticks()`。
+- 需提供 `uint8_t read_level(uint8_t id)` 读 GPIO。
+- 异步模式下主循环需 `event_process_async()`。
 
 ## 快速接入步骤
 1) **定义硬件读脚函数**（根据实际 GPIO 读写封装）：
@@ -89,40 +94,31 @@ void button_poll_5ms(void)
 按需为不同按键定义多个 `Button` 句柄并重复上述流程即可。
 
 ## 事件系统集成说明
-multi_button 在触发每个按键事件时，会调用 `event_publish_ex(BUTTON_EVENT_BASE + ev, ...)` 将事件推送到通用事件系统，方便与其他模块解耦。使用步骤：
 
-1) **初始化事件系统**：在系统启动时调用一次 `event_init();`。
-2) **订阅感兴趣的按键事件**（例如单击）：
+`button_emit` 会对每个 `ButtonEvent` 调用：
+
+```c
+event_publish_ex(
+    (event_type_t)(BUTTON_EVENT_BASE + ev),
+    handle,                    /* Button*，须静态或生命周期覆盖异步出队 */
+    (uint16_t)sizeof(Button),
+    BUTTON_EVENT_DISPATCH_MODE);
+```
+
+1) **初始化**：`event_init();`
+2) **订阅**：
 ```c
 static void on_btn_event(const event_t* ev, void* user)
 {
-    // ev->type == BUTTON_EVENT_BASE + BTN_SINGLE_CLICK 等
-    // ev->data 指向 Button*，data_size 为 sizeof(Button*)
+    (void)user;
+    Button* btn = (Button*)ev->data;
+    ButtonEvent bev = (ButtonEvent)(ev->type - BUTTON_EVENT_BASE);
+    /* btn->button_id, bev */
 }
 
-void button_event_subscribe(void)
-{
-    event_subscribe((event_type_t)(BUTTON_EVENT_BASE + BTN_SINGLE_CLICK),
-                    on_btn_event,
-                    NULL);
-}
+event_subscribe((event_type_t)(BUTTON_EVENT_BASE + BTN_SINGLE_CLICK),
+                on_btn_event, NULL);
 ```
-
-3) **处理异步队列（若启用）**：当 `BUTTON_EVENT_DISPATCH_MODE` 为 `EVENT_DISPATCH_ASYNC` 时，需要在主循环或周期任务中调用 `event_process_async();`，频率与业务实时性匹配即可。
-
-4) **发布模式选择**：
-- `EVENT_DISPATCH_SYNC`：`event_publish_ex` 会立即在当前上下文执行回调，适合快速处理、非中断场景。
-- `EVENT_DISPATCH_ASYNC`：事件入队后由 `event_process_async` 拉取并触发回调，适合中断或需要解耦耗时逻辑的场景。
-
-5) **常用 API 速览**（详情见 [project/code/common/event/event.h](project/code/common/event/event.h)）：
-- `event_subscribe(type, cb, user_data)` / `event_unsubscribe(id)`：注册或取消监听。
-- `event_publish(type, data, size)`：同步发布。
-- `event_publish_async(type, data, size)`：异步入队发布。
-- `event_publish_ex(type, data, size, mode)`：按需选择同步/异步。
-- `event_process_async()`：处理异步队列。
-
-6) **与 multi_button 搭配建议**：
-- 若在中断中调用 `button_ticks()`，保持 `BUTTON_EVENT_DISPATCH_MODE` 为异步，避免在中断中执行用户回调；主循环调用 `event_process_async()` 完成分发。
-- 若在任务/主循环中调用 `button_ticks()`，且回调足够轻量，可将 `BUTTON_EVENT_DISPATCH_MODE` 设为同步以减少延迟。
-
-7) **生命周期与数据有效性**：按钮事件携带的 `data` 指针为 `Button*`（静态存活），无需额外拷贝；若发布自定义事件且使用异步模式，需保证 `data` 在事件出队前有效。
+3) **异步**：默认 ASYNC → 主循环 `event_process_async()`。
+4) **与 MujicaUI**：菜单默认 handler 在 `mjc_input_button`；业务页可 `mjc_input_set_enabled(0)` 后自行订阅，避免双处理。
+5) **生命周期**：`data` 为 `Button*` 且对象须在出队前有效（列表内静态句柄即可）。
