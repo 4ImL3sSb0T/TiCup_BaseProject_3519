@@ -218,7 +218,7 @@ static void app_init(void)
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
-    (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
+    // (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
     /* 16. 开全局中断 */
     interrupt_global_enable(0);
