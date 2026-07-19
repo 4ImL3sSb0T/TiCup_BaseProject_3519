@@ -91,42 +91,54 @@ static soft_timer_id_t app_start_timer(uint32_t period_ms,
 
 static void app_init(void)
 {
-    /* 1. 基础时钟 / 调试串口（逐飞库要求保留） */
+    /*
+     * 初始化顺序（按依赖）：
+     *   clock/debug/dwt → log → event → soft_timer → 业务
+     *
+     * 关键：
+     *   - event_init() 内会调 sys_log_text；log 未 init 时默认 SYS_LOG_WIRELESS，
+     *     会写未初始化的 wireless_uart。
+     *   - soft_timer 创建/启动依赖 event（subscribe/publish）。
+     *   - cmd_service 假定无线串口已由 sys_log_init 初始化。
+     */
+    /* 1. 基础时钟 / 调试串口 / 周期计数（log 失败回退 UART0 依赖 debug_init） */
     clock_init(SYSTEM_CLOCK_80M);
     debug_init();
     dwt_init();
 
-    /* 2. 事件 + 软件定时器 */
-    event_init();
-    soft_timer_init();
-
-    /* 3. 日志：无线转串口（B6/B7）；失败回退 UART0 */
+    /* 2. 日志最先就绪：无线转串口（B6/B7）；失败回退 UART0 */
     sys_log_init(SYS_LOG_WIRELESS);
     sys_log_text(info, "==== BaseProject_3519 boot ====");
 
-    /* 4. 参数系统（Flash 持久化暂未启用） */
+    /* 3. 事件系统（init 路径会打日志） */
+    event_init();
+
+    /* 4. 软件定时器（依赖 event） */
+    soft_timer_init();
+
+    /* 5. 参数系统（Flash 持久化暂未启用） */
     if (param_init() != EXIT_OK) {
         sys_log_text(error, "param_init failed");
     } else {
         sys_log_text(info, "param_init ok");
     }
 
-    /* 5. 命令服务（无线串口 + Debug UART0） */
+    /* 6. 命令服务（无线串口 + Debug UART0；无线由 log 已 init） */
     cmd_service_init();
     sys_log_text(info, "cmd_service_init ok (wireless B6/B7 + debug UART0)");
 
-    /* 5b. 核心板 LED（A14） */
+    /* 7. 核心板 LED（A14） */
     gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
     sys_log_text(info, "LED heartbeat on A14");
 
     /*
-     * 6–8. 电机 / 编码器 / 底盘 —— 暂关闭
+     * 电机 / 编码器 / 底盘 —— 暂关闭
      * 原因：右编码器 CH1 占用 B7，与无线串口 RX 冲突；WiFi SPI 当前不可用。
      * 恢复时：改编码器脚或改通信脚，并同步 docs/hardware.md。
      */
     sys_log_text(info, "motor/encoder/chassis: DISABLED (B7 -> wireless RX)");
 
-    /* 7. IMU（6 轴，无磁力计） */
+    /* 8. IMU（6 轴，无磁力计；init 路径会打日志） */
     {
         exit_code_t imu_ret = imu_init(imu_mode_no_mag);
         if (imu_ret != EXIT_OK) {
@@ -136,11 +148,11 @@ static void app_init(void)
         }
     }
 
-    /* 9. 1ms 系统节拍 */
+    /* 9. 1ms 系统节拍（驱动 soft_timer 的 sys_time_ms） */
     pit_ms_init(SYS_TICK_PIT, 1, pit_1ms_callback, NULL);
     sys_log_text(info, "sys tick 1ms on PIT_G12");
 
-    /* 10. 周期任务（无 motion / chassis） */
+    /* 10. 周期任务（依赖 soft_timer + event） */
     (void)app_start_timer(CMD_POLL_INTERVAL_MS, cmd_service_task, "cmd");
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
