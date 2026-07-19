@@ -12,8 +12,8 @@ typedef struct mjc_page_t mjc_page_t;
 
 typedef enum {
     MJC_EVENT_EXIT,       // 退出该项
-    MJC_EVENT_CHANGE,     // 值改变（number/checkbox）UI 交互时触发
-    MJC_EVENT_TRIGGER,     // 触发事件（如按钮按下）
+    MJC_EVENT_CHANGE,     // 值改变：NUMBER commit / CHECKBOX 已翻转后
+    MJC_EVENT_TRIGGER,     // 触发：进入编辑、激活项；CHECKBOX 在翻转后也会收到
     MJC_EVENT_CUSTOM,      // 自定义事件
 } mjc_event_type_t;
 

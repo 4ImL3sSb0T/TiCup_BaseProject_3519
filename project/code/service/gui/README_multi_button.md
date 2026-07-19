@@ -56,10 +56,11 @@ button_attach(&btn_user, BTN_LONG_PRESS_START, on_long_start);
 - `BTN_SINGLE_CLICK`：单击确认。
 - `BTN_DOUBLE_CLICK`：双击确认。
 - `BTN_LONG_PRESS_START`：长按阈值达到时触发。
-- `BTN_LONG_PRESS_HOLD`：长按保持期间周期触发。
+- `BTN_LONG_PRESS_HOLD`：长按保持期间**按间隔**触发（默认约 50ms 一次，见 `LONG_HOLD_INTERVAL_TICKS`）。
 
 ## 参数与行为说明
 - 去抖深度 `DEBOUNCE_TICKS`、短按阈值 `SHORT_TICKS`、长按阈值 `LONG_TICKS` 由头文件宏定义；若调整 `TICKS_INTERVAL`，请同步修改这些阈值或其计算公式。
+- **`LONG_HOLD_INTERVAL_TICKS`**：长按保持事件节流（默认 `50 / TICKS_INTERVAL`）。进入长按后重置 tick，达到间隔才再发 `BTN_LONG_PRESS_HOLD`，减轻异步事件队列压力。
 - `PRESS_REPEAT_MAX_NUM` 限制重复计数上限（默认 15）。
 - 事件发布：类型号为 `BUTTON_EVENT_BASE + ev`，派发模式由 `BUTTON_EVENT_DISPATCH_MODE` 控制（默认 `EVENT_DISPATCH_ASYNC`）。
 - 辅助接口：`button_get_event()` 获取最近事件；`button_get_repeat_count()` 查询重复次数；`button_is_pressed()` 判断当前按键电平是否处于按下态。

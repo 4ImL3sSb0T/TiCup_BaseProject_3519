@@ -145,14 +145,37 @@ static void mjc_ips200_draw_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     ips200_draw_line(x_end, y, x_end, y_end, color);
 }
 
+/* Max line width for solid fill (IPS200 landscape 320). Shared by IPS200/114. */
+#define MJC_FILL_LINE_MAX  320
+static uint16_t s_fill_line[MJC_FILL_LINE_MAX];
+
+static void mjc_fill_line_prepare(uint16_t w, uint16_t color)
+{
+    for (uint16_t i = 0; i < w; i++) {
+        s_fill_line[i] = color;
+    }
+}
+
 static void mjc_ips200_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color) {
     if (!mjc_clip_rect(x, y, &w, &h)) {
         return;
     }
-    uint16_t y_end = y + h;
-    uint16_t x_end = x + w - 1;
-    for (uint16_t row = y; row < y_end; row++) {
-        ips200_draw_line(x, row, x_end, row, color);
+    /*
+     * Bulk region write via show_rgb565_image (one set_region + row SPI burst),
+     * instead of per-pixel draw_line which is extremely slow on SPI panels.
+     */
+    uint16_t chunk_x = x;
+    uint16_t remain = w;
+    while (remain > 0) {
+        uint16_t chunk_w = remain;
+        if (chunk_w > MJC_FILL_LINE_MAX) {
+            chunk_w = MJC_FILL_LINE_MAX;
+        }
+        mjc_fill_line_prepare(chunk_w, color);
+        /* Source is 1xchunk_w solid row; stretch vertically to h. */
+        ips200_show_rgb565_image(chunk_x, y, s_fill_line, chunk_w, 1, chunk_w, h, 0);
+        chunk_x = (uint16_t)(chunk_x + chunk_w);
+        remain = (uint16_t)(remain - chunk_w);
     }
 }
 
@@ -220,10 +243,17 @@ static void mjc_ips114_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     if (!mjc_clip_rect(x, y, &w, &h)) {
         return;
     }
-    uint16_t y_end = y + h;
-    uint16_t x_end = x + w - 1;
-    for (uint16_t row = y; row < y_end; row++) {
-        ips114_draw_line(x, row, x_end, row, color);
+    uint16_t chunk_x = x;
+    uint16_t remain = w;
+    while (remain > 0) {
+        uint16_t chunk_w = remain;
+        if (chunk_w > MJC_FILL_LINE_MAX) {
+            chunk_w = MJC_FILL_LINE_MAX;
+        }
+        mjc_fill_line_prepare(chunk_w, color);
+        ips114_show_rgb565_image(chunk_x, y, s_fill_line, chunk_w, 1, chunk_w, h, 0);
+        chunk_x = (uint16_t)(chunk_x + chunk_w);
+        remain = (uint16_t)(remain - chunk_w);
     }
 }
 

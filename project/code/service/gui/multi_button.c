@@ -184,8 +184,9 @@ static void button_handler(Button* handle)
                         handle->ticks = 0;
                         handle->state = BTN_STATE_RELEASE;
                 } else if (handle->ticks > LONG_TICKS) {
-                        // Long press detected
+                        // Long press detected; reset ticks for hold interval pacing
                         button_emit(handle, BTN_LONG_PRESS_START);
+                        handle->ticks = 0;
                         handle->state = BTN_STATE_LONG_HOLD;
                 }
                 break;
@@ -229,8 +230,11 @@ static void button_handler(Button* handle)
 
         case BTN_STATE_LONG_HOLD:
                 if (handle->button_level == handle->active_level) {
-                        // Continue holding
-                        button_emit(handle, BTN_LONG_PRESS_HOLD);
+                        /* Throttle HOLD to LONG_HOLD_INTERVAL_TICKS (default 50ms). */
+                        if (handle->ticks >= LONG_HOLD_INTERVAL_TICKS) {
+                                button_emit(handle, BTN_LONG_PRESS_HOLD);
+                                handle->ticks = 0;
+                        }
                 } else {
                         // Released from long press
                         button_emit(handle, BTN_PRESS_UP);

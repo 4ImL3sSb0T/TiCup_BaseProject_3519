@@ -102,18 +102,6 @@ static void mjc_submenu_action(mjc_item_t* item, mjc_event_type_t event, void* u
     }
 }
 
-static void mjc_checkbox_action(mjc_item_t* item, mjc_event_type_t event, void* user_data)
-{
-    (void)user_data;
-    if (item == NULL || item->type != MJC_ITEM_TYPE_CHECKBOX || item->data.checkbox == NULL) {
-        return;
-    }
-
-    if (event == MJC_EVENT_TRIGGER) {
-        *(item->data.checkbox) = !(*(item->data.checkbox));
-    }
-}
-
 mjc_page_t* mjc_get_current_page(void)
 {
     return g_current_page;
@@ -125,8 +113,9 @@ uint8_t mjc_set_current_page(mjc_page_t* page)
         return 0;
     }
 
+    /* Unify exit path with AUX/back: discard buffer and fire MJC_EVENT_EXIT. */
     if (s_edit_mode) {
-        mjc_edit_clear();
+        (void)mjc_edit_cancel();
     }
 
     if (page->selected_index >= page->count) {
@@ -162,12 +151,9 @@ static void mjc_set_page_parent(mjc_page_t* page, mjc_page_t* parent_page)
 
     for (uint8_t i = 0; i < page->count; i++) {
         mjc_item_t* item = &page->items[i];
-        if (item->action == NULL) {
-            if (item->type == MJC_ITEM_TYPE_SUBMENU) {
-                item->action = mjc_submenu_action;
-            } else if (item->type == MJC_ITEM_TYPE_CHECKBOX) {
-                item->action = mjc_checkbox_action;
-            }
+        /* CHECKBOX toggle+CHANGE is handled in mjc_item_execute; only auto-wire submenu. */
+        if (item->action == NULL && item->type == MJC_ITEM_TYPE_SUBMENU) {
+            item->action = mjc_submenu_action;
         }
         if (item->type == MJC_ITEM_TYPE_SUBMENU && item->data.submenu != NULL) {
             mjc_set_page_parent(item->data.submenu, page);
@@ -224,6 +210,21 @@ uint8_t mjc_item_execute(mjc_item_t* item, mjc_event_type_t event)
 {
     if (item == NULL) {
         return 0;
+    }
+
+    /*
+     * CHECKBOX: core always toggles on TRIGGER, then delivers TRIGGER and CHANGE
+     * so app action handlers match NUMBER commit (listen on MJC_EVENT_CHANGE).
+     */
+    if (item->type == MJC_ITEM_TYPE_CHECKBOX && event == MJC_EVENT_TRIGGER) {
+        if (item->data.checkbox != NULL) {
+            *(item->data.checkbox) = (uint8_t)(!(*(item->data.checkbox)));
+        }
+        if (item->action != NULL) {
+            item->action(item, MJC_EVENT_TRIGGER, item->user_data);
+            item->action(item, MJC_EVENT_CHANGE, item->user_data);
+        }
+        return 1;
     }
 
     if (item->action != NULL) {
