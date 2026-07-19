@@ -179,6 +179,11 @@ int param_get_by_index(uint16_t index, param_t *param)
     return 0;
 }
 
+uint16_t param_get_count(void)
+{
+    return param_count;
+}
+
 int param_get_value(const char *name, void *data)
 {
     if (!name || !data) {

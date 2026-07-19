@@ -108,7 +108,8 @@ navigator status\n
 - 运行时改查：`set` / `get` / `show [prefix]`（内存注册表）
 - 备份可读文本：`export`（打印 key=value，不写 Flash）
 - 持久化：`save` / `load` → LittleFS `/param.txt`（DATA Flash，经 `fs_service`）
-- 启动顺序：`fs_init` → `param_init` → 各模块 `param_add` → `param_load`
+- 启动顺序：`param_init` → 各模块 `param_add` → `fs_init` → `param_load` → `gui_app_init`（GUI 按注册表动态建 Params 页）
+- 遍历：`param_get_count()` + `param_get_by_index(i, …)`
 
 > 旧工程中的 `navigator` / `estimator` / `openart` / `sokoban` / `timer` 等 **本固件未注册**。
 

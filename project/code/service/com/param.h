@@ -45,6 +45,8 @@ int param_set_value(const char* name, void* data);
 int param_get(const char* name, param_t* param);
 int param_get_by_index(uint16_t index, param_t* param);
 int param_get_value(const char* name, void* data);
+/** 已注册参数数量（只读快照，非临界区） */
+uint16_t param_get_count(void);
 exit_code_t param_add(const char* name, param_type_t type, void* data, bool need_storage);
 
 /**

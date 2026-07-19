@@ -152,6 +152,23 @@ flowchart LR
 
 当前已通过 `gui_app_init()` 接入 `main.c`（按键 A30/A31/B0/B1 + IPS200）。菜单定义见 `service/gui/gui_app.c`。
 
+### Params 动态设置页（gui_app）
+
+`gui_app_init()` 在全部 `param_add`（及 `param_load`）之后调用，会：
+
+1. 用 `param_get_count()` / `param_get_by_index()` 遍历注册表
+2. 按参数名 **首段前缀** 分组（`motor_kp` → 组 `motor`，`chassis_max_v` → 组 `chassis`）
+3. 每组生成一页 `NUMBER` 项，`value_ptr` 直接指向业务变量（与串口 `set` 同一份 RAM）
+4. 根菜单出现 **Params** 子菜单；组内 MAIN 进入编辑、AUX 返回；Params 内另有 **Save Params**
+
+| 操作 | 效果 |
+|------|------|
+| 编辑 commit | 写回参数指针；`motor_*` 额外 `motor_apply_param()`；`chassis_*` 由 `chassis_update` 热刷 |
+| Save Params | `param_save()` → LFS `/param.txt`（与串口 `save` 相同） |
+| 新增 `param_add` | 无需改 GUI 源码；重启后自动出现对应组/项（池上限：分组 12、条目 `PARAM_MAX_COUNT`） |
+
+显示名去掉前缀以省宽度（如 `half_track`）；完整 key 仅用于 apply 判断与日志。
+
 ```c
 #include "service/gui/MujicaUI_Lite/mjc_core.h"
 #include "service/gui/MujicaUI_Lite/mjc_input_button.h"
