@@ -23,6 +23,8 @@ ctk.set_default_color_theme("blue")
 CHASSIS_MODES = ("idle", "openloop", "speed", "yaw_rate", "heading")
 MOTOR_MODES = ("speed", "openloop", "position")
 PLOT_MAX_POINTS = 120
+LOG_MAX_LINES = 2000
+WASD_SEND_MIN_DT = 0.08
 
 
 class HostApp(ctk.CTk):
@@ -65,8 +67,14 @@ class HostApp(ctk.CTk):
         self._right_spd = 0.0
         self._left_tgt = 0.0
         self._right_tgt = 0.0
+        self._left_tgt_pwm = 0.0
+        self._right_tgt_pwm = 0.0
+        self._left_pos = 0.0
+        self._right_pos = 0.0
         self._left_mode = "—"
         self._right_mode = "—"
+        # Allow a few status lines through the log after manual status requests.
+        self._status_log_budget = 0
 
         self._build_ui()
         self._bind_entry_focus()
@@ -121,7 +129,8 @@ class HostApp(ctk.CTk):
 
         ctk.CTkLabel(bar, text="波特率").grid(row=0, column=3, padx=(10, 4), pady=8)
         self.baud_var = ctk.StringVar(value=str(self.cfg.get("baud", DEFAULT_BAUD)))
-        ctk.CTkEntry(bar, textvariable=self.baud_var, width=72).grid(row=0, column=4, padx=4, pady=8)
+        self.baud_entry = ctk.CTkEntry(bar, textvariable=self.baud_var, width=72)
+        self.baud_entry.grid(row=0, column=4, padx=4, pady=8)
 
         self.connect_btn = ctk.CTkButton(bar, text="连接", width=72, command=self._toggle_connect)
         self.connect_btn.grid(row=0, column=5, padx=6, pady=8)
@@ -505,13 +514,22 @@ class HostApp(ctk.CTk):
     # ------------------------------------------------------- focus / ports
     def _bind_entry_focus(self) -> None:
         def on_in(_e=None) -> None:
+            # Drop sticky WASD keys when entering a text field.
+            if self._keys_down:
+                self._keys_down.clear()
+                self._update_wasd(force_send=True)
             self._typing = True
 
         def on_out(_e=None) -> None:
             self._typing = False
+            # Discard any keys that stuck while typing (no KeyRelease delivered).
+            if self._keys_down:
+                self._keys_down.clear()
+                self._update_wasd(force_send=True)
 
         widgets = [
             self.cmd_entry,
+            self.baud_entry,
             self.hdg_entry.entry,
             self.motor_val.entry,
             self.jog_duty.entry,
@@ -571,7 +589,27 @@ class HostApp(ctk.CTk):
         except Exception:
             pass
 
-    def _disconnect(self, send_stop: bool = True) -> None:
+    def _reset_drive_state(self) -> None:
+        """Clear local drive/WASD state after stop or disconnect."""
+        self._keys_down.clear()
+        self._wasd_v = 0.0
+        self._wasd_w = 0.0
+        self._control_owner = "idle"
+        self._chassis_mode = "idle"
+        self._vw_dirty = False
+        self._vw_sent_v = 0.0
+        self._vw_sent_w = 0.0
+        try:
+            self.v_slider.set(0)
+            self.w_slider.set(0)
+            self.v_lbl.configure(text="v = 0.00")
+            self.w_lbl.configure(text="ω = 0.00")
+            self._update_vw_status()
+            self._update_owner_label()
+        except Exception:
+            pass
+
+    def _disconnect(self, send_stop: bool = True, reason: str = "已断开", error: bool = False) -> None:
         self._cancel_jog()
         if send_stop and self.client.is_open:
             try:
@@ -580,14 +618,15 @@ class HostApp(ctk.CTk):
             except Exception:
                 pass
             time.sleep(0.05)
-        self.client.close()
+        try:
+            self.client.close()
+        except Exception:
+            pass
         self.connect_btn.configure(text="连接")
-        self.status_dot.set_state(False)
-        self.status_lbl.configure(text="未连接")
-        self._control_owner = "idle"
-        self._chassis_mode = "idle"
-        self._update_owner_label()
-        self._log_ui("已断开", "tx")
+        self.status_dot.set_state(False, error=error)
+        self.status_lbl.configure(text="连接异常" if error else "未连接")
+        self._reset_drive_state()
+        self._log_ui(reason, "error" if error else "tx")
 
     def _on_close(self) -> None:
         self.cfg["poll_enabled"] = bool(self.poll_var.get())
@@ -602,6 +641,12 @@ class HostApp(ctk.CTk):
         self.destroy()
 
     # --------------------------------------------------------------- send
+    def _note_manual_status(self, command: str) -> None:
+        """Let a few status response lines appear in the console log."""
+        low = command.lower()
+        if "status" in low:
+            self._status_log_budget = max(self._status_log_budget, 8)
+
     def _send(self, command: str, force_seq: Optional[bool] = None, silent: bool = False) -> None:
         if not self.client.is_open:
             self._log_ui("未连接，无法发送", "error")
@@ -613,6 +658,7 @@ class HostApp(ctk.CTk):
             self._log_ui(f"发送失败: {e}", "error")
             return
         if not silent:
+            self._note_manual_status(command)
             if seq >= 0:
                 self._log_ui(f"@{seq} {command}", "tx")
             else:
@@ -628,6 +674,7 @@ class HostApp(ctk.CTk):
                 return
             try:
                 self.client.send_raw(text, with_seq=False)
+                self._note_manual_status(text)
                 self._log_ui(text, "tx")
             except Exception as e:
                 self._log_ui(f"发送失败: {e}", "error")
@@ -637,19 +684,7 @@ class HostApp(ctk.CTk):
 
     def _emergency_stop(self) -> None:
         self._cancel_jog()
-        self._keys_down.clear()
-        self._wasd_v = 0.0
-        self._wasd_w = 0.0
-        self.v_slider.set(0)
-        self.w_slider.set(0)
-        self._on_vw_slide(0)
-        self._vw_dirty = False
-        self._vw_sent_v = 0.0
-        self._vw_sent_w = 0.0
-        self._update_vw_status()
-        self._control_owner = "idle"
-        self._chassis_mode = "idle"
-        self._update_owner_label()
+        self._reset_drive_state()
         if not self.client.is_open:
             self._log_ui("急停：未连接", "error")
             return
@@ -661,12 +696,15 @@ class HostApp(ctk.CTk):
                 self._log_ui(f"急停发送失败: {e}", "error")
 
     def _ensure_motor_owner(self) -> bool:
-        """Stop chassis if needed before motor commands. Returns False if aborted."""
+        """Stop chassis if board mode is active before motor commands."""
         if not self.client.is_open:
             self._log_ui("未连接，无法发送", "error")
             return False
-        if self._chassis_mode not in ("idle", "") and self._control_owner == "chassis":
-            self._log_ui("电机操作：先停止底盘", "tx")
+        # Trust telemetry mode, not only UI ownership — free-cmd / external control
+        # can leave owner=idle while the board is still in speed/openloop/etc.
+        mode = (self._chassis_mode or "idle").lower()
+        if mode not in ("idle", "", "unknown"):
+            self._log_ui(f"电机操作：先停止底盘 (mode={mode})", "tx")
             try:
                 self.client.send_raw(cmd.chassis_stop(), with_seq=False)
             except Exception as e:
@@ -676,6 +714,10 @@ class HostApp(ctk.CTk):
             self.v_slider.set(0)
             self.w_slider.set(0)
             self._on_vw_slide(0)
+            self._vw_sent_v = 0.0
+            self._vw_sent_w = 0.0
+            self._vw_dirty = False
+            self._update_vw_status()
         self._control_owner = "motor"
         self._update_owner_label()
         return True
@@ -905,14 +947,15 @@ class HostApp(ctk.CTk):
             self._update_wasd()
 
     def _on_key_release(self, event) -> None:
-        if self._typing:
-            return
         key = (event.keysym or "").lower()
+        if key not in ("w", "a", "s", "d"):
+            return
+        # Always process release (even while typing) so keys cannot stick.
         if key in self._keys_down:
             self._keys_down.discard(key)
-            self._update_wasd()
+            self._update_wasd(force_send=True)
 
-    def _update_wasd(self) -> None:
+    def _update_wasd(self, force_send: bool = False) -> None:
         v = 0.0
         w = 0.0
         if "w" in self._keys_down:
@@ -927,10 +970,21 @@ class HostApp(ctk.CTk):
         self._wasd_w = w
         self.v_slider.set(v)
         self.w_slider.set(w)
-        self._on_vw_slide(0)
+        self.v_lbl.configure(text=f"v = {v:.2f}")
+        self.w_lbl.configure(text=f"ω = {w:.2f}")
+
+        stopped = abs(v) < 1e-6 and abs(w) < 1e-6
+        # Stop must never be dropped by rate-limit (safety).
+        if stopped:
+            force_send = True
+
         now = time.time()
-        if now - self._last_wasd_send < 0.08:
+        if not force_send and (now - self._last_wasd_send) < WASD_SEND_MIN_DT:
+            if abs(v - self._vw_sent_v) > 1e-3 or abs(w - self._vw_sent_w) > 1e-3:
+                self._vw_dirty = True
+                self._update_vw_status()
             return
+
         self._last_wasd_send = now
         if self.client.is_open:
             try:
@@ -942,6 +996,11 @@ class HostApp(ctk.CTk):
                 self._update_vw_status()
             except Exception as e:
                 self._log_ui(f"WASD 发送失败: {e}", "error")
+        else:
+            self._vw_sent_v = v
+            self._vw_sent_w = w
+            self._vw_dirty = False
+            self._update_vw_status()
 
     # ---------------------------------------------------------- poll / log
     def _on_poll_toggle(self) -> None:
@@ -964,19 +1023,26 @@ class HostApp(ctk.CTk):
             self._put_disconnect(str(e))
 
     def _put_disconnect(self, msg: str) -> None:
-        self.status_dot.set_state(False, error=True)
-        self.status_lbl.configure(text="连接异常")
-        self._log_ui(f"串口异常: {msg}", "error")
-        try:
-            self.client.close()
-        except Exception:
-            pass
-        self.connect_btn.configure(text="连接")
+        # Same cleanup path as manual disconnect (cancel jog, clear WASD, etc.).
+        self._disconnect(send_stop=False, reason=f"串口异常: {msg}", error=True)
 
     def _clear_log(self) -> None:
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
+
+    def _trim_log(self) -> None:
+        """Keep log_box from growing without bound (long sessions)."""
+        try:
+            end_index = self.log_box.index("end-1c")
+            line_count = int(end_index.split(".")[0])
+        except Exception:
+            return
+        if line_count <= LOG_MAX_LINES:
+            return
+        # Drop oldest half when over limit.
+        drop = line_count - (LOG_MAX_LINES // 2)
+        self.log_box.delete("1.0", f"{drop}.0")
 
     def _log_ui(self, text: str, kind: str = "rx") -> None:
         prefixes = {
@@ -992,6 +1058,7 @@ class HostApp(ctk.CTk):
             return
         self.log_box.configure(state="normal")
         self.log_box.insert("end", line + "\n")
+        self._trim_log()
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
@@ -1038,13 +1105,13 @@ class HostApp(ctk.CTk):
     def _handle_rx_line(self, line: str) -> None:
         if "{motor_l}" in line:
             return
-        # hide poll status noise
-        if self.poll_var.get() and (
-            "chassis:" in line
-            or "Left:" in line
-            or "Right:" in line
-        ):
-            return
+        is_status = "chassis:" in line or "Left:" in line or "Right:" in line
+        # Hide background poll noise, but show manual status replies.
+        if self.poll_var.get() and is_status:
+            if self._status_log_budget > 0:
+                self._status_log_budget -= 1
+            else:
+                return
         if self.filter_ack.get() and "{cmd_ack}" not in line:
             return
         tag, body = strip_log_tag(line)
@@ -1079,21 +1146,41 @@ class HostApp(ctk.CTk):
         self._plot_r_spd.append(self._right_spd)
         self._redraw_plot()
 
+    @staticmethod
+    def _motor_tgt_text(mode: str, tgt_spd: float, tgt_pwm: float) -> str:
+        m = (mode or "").lower()
+        if "open" in m:
+            return f"pwm={tgt_pwm:+.0f}"
+        if "pos" in m:
+            return f"pos_tgt={tgt_spd:+.1f}"
+        return f"spd={tgt_spd:+.2f}"
+
+    def _refresh_motor_info(self) -> None:
+        lt = self._motor_tgt_text(self._left_mode, self._left_tgt, self._left_tgt_pwm)
+        rt = self._motor_tgt_text(self._right_mode, self._right_tgt, self._right_tgt_pwm)
+        self.motor_info.configure(
+            text=(
+                f"L: mode={self._left_mode}  spd={self._left_spd:+.2f}  "
+                f"tgt[{lt}]  pos={self._left_pos:+.0f}\n"
+                f"R: mode={self._right_mode}  spd={self._right_spd:+.2f}  "
+                f"tgt[{rt}]  pos={self._right_pos:+.0f}"
+            )
+        )
+
     def _handle_motor(self, m: MotorStatus) -> None:
         if m.name == "Left":
             self._left_spd = m.spd
             self._left_tgt = m.tgt_spd
+            self._left_tgt_pwm = m.tgt_pwm
+            self._left_pos = m.pos
             self._left_mode = m.mode
         else:
             self._right_spd = m.spd
             self._right_tgt = m.tgt_spd
+            self._right_tgt_pwm = m.tgt_pwm
+            self._right_pos = m.pos
             self._right_mode = m.mode
-        self.motor_info.configure(
-            text=(
-                f"L: mode={self._left_mode}  spd={self._left_spd:+.2f}  tgt={self._left_tgt:+.2f}\n"
-                f"R: mode={self._right_mode}  spd={self._right_spd:+.2f}  tgt={self._right_tgt:+.2f}"
-            )
-        )
+        self._refresh_motor_info()
 
     def _redraw_plot(self) -> None:
         if not self._plot_t:

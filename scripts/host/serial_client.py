@@ -21,6 +21,8 @@ from host.protocol import (
 
 DEFAULT_BAUD = 115200
 MAX_CMD_LEN = 128
+# Bound pending ACK map so UI-only sessions (no wait_ack) do not grow forever.
+_MAX_ACK_RESULTS = 64
 
 
 def list_serial_ports() -> list[str]:
@@ -81,6 +83,11 @@ class SerialClient:
             except Exception:
                 pass
             self._ser = None
+        with self._ack_lock:
+            for ev in self._ack_events.values():
+                ev.set()
+            self._ack_events.clear()
+            self._ack_results.clear()
 
     def _next_seq(self) -> int:
         with self._seq_lock:
@@ -116,16 +123,23 @@ class SerialClient:
         return self.send_raw(cmd, with_seq=True)
 
     def wait_ack(self, seq: int, timeout: float = 1.0) -> Optional[Ack]:
+        """Wait for ACK of *seq*. Safe if ACK arrives before/after registration."""
         if seq < 0:
             return None
-        ev = threading.Event()
         with self._ack_lock:
+            if seq in self._ack_results:
+                return self._ack_results.pop(seq)
+            ev = threading.Event()
             self._ack_events[seq] = ev
-        ok = ev.wait(timeout)
+            # ACK may have landed between the check and registering the event.
+            if seq in self._ack_results:
+                self._ack_events.pop(seq, None)
+                return self._ack_results.pop(seq)
+        ev.wait(timeout)
         with self._ack_lock:
             self._ack_events.pop(seq, None)
-            ack = self._ack_results.pop(seq, None)
-        return ack if ok else None
+            # Return result if present even when wait timed out (late race).
+            return self._ack_results.pop(seq, None)
 
     def _put(self, q: queue.Queue, item) -> None:
         try:
@@ -139,6 +153,16 @@ class SerialClient:
                 q.put_nowait(item)
             except queue.Full:
                 pass
+
+    def _store_ack(self, ack: Ack) -> None:
+        with self._ack_lock:
+            self._ack_results[ack.seq] = ack
+            while len(self._ack_results) > _MAX_ACK_RESULTS:
+                # dict preserves insertion order (3.7+)
+                self._ack_results.pop(next(iter(self._ack_results)))
+            ev = self._ack_events.get(ack.seq)
+            if ev is not None:
+                ev.set()
 
     def _handle_line(self, line: str) -> None:
         line = line.rstrip("\r\n")
@@ -155,11 +179,7 @@ class SerialClient:
         ack = parse_ack(line)
         if ack is not None:
             self._put(self.ack_queue, ack)
-            with self._ack_lock:
-                self._ack_results[ack.seq] = ack
-                ev = self._ack_events.get(ack.seq)
-                if ev is not None:
-                    ev.set()
+            self._store_ack(ack)
 
         ch = parse_chassis_status(line)
         if ch is not None:
