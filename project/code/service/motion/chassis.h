@@ -42,8 +42,8 @@ extern "C" {
  */
 #define CHASSIS_OMEGA_TO_WHEEL_DEFAULT  (0.15f)
 
-/** IMU 航向/角速度符号：实车反向时改为 -1 */
-#define CHASSIS_IMU_YAW_SIGN_DEFAULT    (1.0f)
+/** IMU 航向/角速度符号：实车反向时改为 -1（本车角速度环实测需取反） */
+#define CHASSIS_IMU_YAW_SIGN_DEFAULT    (-1.0f)
 
 typedef enum {
     CHASSIS_MODE_IDLE = 0,
