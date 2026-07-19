@@ -32,6 +32,8 @@ BaseProject_3519 上位机 — 使用说明
    · WASD 遥控；空格 = 急停
 
 4) 改参（参数 Tab）
+   · 连接后自动 `show` 拉取板端参数表（右侧列表，可「刷新」）
+   · 左侧「过滤」只筛列表显示；点行填入名/值并 get 刷新
    · set 只改板子 RAM
    · 电机 PID：set 后点「应用 motor param」
    · 底盘 PID：set 后点「应用 chassis param」
@@ -66,7 +68,7 @@ BaseProject_3519 上位机 — 使用说明
 ------------
   驾驶    底盘模式、v/ω、预设、遥测、曲线
   电机    单/双轮 mode·set·点动
-  参数    get/set/show/save/load + 常用名
+  参数    动态参数表 + get/set/show/save/load
   控制台  原始日志与自由命令
   帮助    本页
 
@@ -74,26 +76,8 @@ BaseProject_3519 上位机 — 使用说明
 七、常见问题
 ------------
 · 无回显：波特率、TX/RX、是否发了换行（本工具自动加 \\n）
+· 参数表空：未连接 / 点「刷新」/ 看控制台 show 是否有回显
 · imu_not_ready：等 IMU 就绪再进 yaw_rate / heading
 · 改了 kp 无变化：是否点了对应 param 应用
 · 重启参数丢：是否 save 成功
 """.strip()
-
-
-# Common param names for quick pick
-COMMON_PARAMS = [
-    "motor_kp",
-    "motor_ki",
-    "chassis_half_track",
-    "chassis_max_v",
-    "chassis_max_omega",
-    "chassis_ol_v_scale",
-    "chassis_ol_w_scale",
-    "chassis_omega_to_wheel",
-    "chassis_imu_yaw_sign",
-    "chassis_yaw_rate_kp",
-    "chassis_yaw_rate_ki",
-    "chassis_heading_kp",
-    "chassis_heading_ki",
-    "chassis_heading_kd",
-]

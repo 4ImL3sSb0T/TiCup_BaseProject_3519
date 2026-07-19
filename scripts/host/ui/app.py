@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import Deque, Optional
+from typing import Deque, Dict, Optional
 
 import customtkinter as ctk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -12,9 +12,23 @@ from matplotlib.figure import Figure
 
 from host import commands as cmd
 from host.config_store import load_config, save_config
-from host.protocol import Ack, ChassisStatus, MotorStatus, strip_log_tag
+from host.protocol import (
+    Ack,
+    ChassisStatus,
+    MotorStatus,
+    ParamEntry,
+    parse_ctx_fields,
+    parse_export_end,
+    parse_export_kv,
+    parse_get_terminal,
+    parse_param_ack_ctx,
+    parse_set_terminal,
+    parse_show_end,
+    parse_show_param_row,
+    strip_log_tag,
+)
 from host.serial_client import DEFAULT_BAUD, SerialClient, list_serial_ports
-from host.ui.help_text import COMMON_PARAMS, HELP_TEXT
+from host.ui.help_text import HELP_TEXT
 from host.ui.widgets import LabeledEntry, MetricCard, StatusDot
 
 ctk.set_appearance_mode("dark")
@@ -25,6 +39,7 @@ MOTOR_MODES = ("speed", "openloop", "position")
 PLOT_MAX_POINTS = 120
 LOG_MAX_LINES = 2000
 WASD_SEND_MIN_DT = 0.08
+PARAM_SYNC_TIMEOUT_MS = 3500
 
 
 class HostApp(ctk.CTk):
@@ -75,6 +90,14 @@ class HostApp(ctk.CTk):
         self._right_mode = "—"
         # Allow a few status lines through the log after manual status requests.
         self._status_log_budget = 0
+
+        # Dynamic param table from board `show` / `export`.
+        self._params: Dict[str, ParamEntry] = {}
+        self._param_sync_active = False
+        self._param_sync_buf: Dict[str, ParamEntry] = {}
+        self._param_sync_mode = ""  # "show" | "export"
+        self._param_sync_job: Optional[str] = None
+        self._param_sync_seq = -1
 
         self._build_ui()
         self._bind_entry_focus()
@@ -407,6 +430,7 @@ class HostApp(ctk.CTk):
         tab = self.tab_param
         tab.grid_columnconfigure(0, weight=1)
         tab.grid_columnconfigure(1, weight=1)
+        tab.grid_rowconfigure(0, weight=1)
 
         left = ctk.CTkFrame(tab)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=4)
@@ -416,30 +440,29 @@ class HostApp(ctk.CTk):
 
         row1 = ctk.CTkFrame(left, fg_color="transparent")
         row1.pack(fill="x", padx=8, pady=4)
-        self.param_name = LabeledEntry(row1, "名", width=150, default="motor_kp")
+        self.param_name = LabeledEntry(row1, "名", width=150, default="")
         self.param_name.pack(side="left", padx=4)
-        self.param_value = LabeledEntry(row1, "值", width=90, default="120")
+        self.param_value = LabeledEntry(row1, "值", width=90, default="")
         self.param_value.pack(side="left", padx=4)
 
         row2 = ctk.CTkFrame(left, fg_color="transparent")
         row2.pack(fill="x", padx=8, pady=4)
         ctk.CTkButton(row2, text="get", width=60, command=self._param_get).pack(side="left", padx=3)
         ctk.CTkButton(row2, text="set", width=60, command=self._param_set).pack(side="left", padx=3)
-        self.param_prefix = LabeledEntry(row2, "前缀", width=90, default="motor")
+        self.param_prefix = LabeledEntry(row2, "过滤", width=90, default="")
         self.param_prefix.pack(side="left", padx=8)
+        self.param_prefix.entry.bind("<KeyRelease>", lambda _e: self._rebuild_param_list())
         ctk.CTkButton(row2, text="show", width=60, command=self._param_show).pack(side="left", padx=3)
 
         row3 = ctk.CTkFrame(left, fg_color="transparent")
         row3.pack(fill="x", padx=8, pady=8)
-        ctk.CTkButton(row3, text="export", width=70, command=lambda: self._send(cmd.param_export())).pack(
+        ctk.CTkButton(row3, text="export", width=70, command=self._param_export_console).pack(
             side="left", padx=3
         )
         ctk.CTkButton(row3, text="save", width=70, command=lambda: self._send(cmd.param_save())).pack(
             side="left", padx=3
         )
-        ctk.CTkButton(row3, text="load", width=70, command=lambda: self._send(cmd.param_load())).pack(
-            side="left", padx=3
-        )
+        ctk.CTkButton(row3, text="load", width=70, command=self._param_load).pack(side="left", padx=3)
 
         row4 = ctk.CTkFrame(left, fg_color="transparent")
         row4.pack(fill="x", padx=8, pady=4)
@@ -450,26 +473,29 @@ class HostApp(ctk.CTk):
 
         ctk.CTkLabel(
             left,
-            text="set 只改 RAM；PID 必须再点 apply；掉电保存用 save。",
+            text="右侧列表从板端 show 动态拉取；set 只改 RAM；PID 需 apply；掉电用 save。",
             text_color="gray",
         ).pack(anchor="w", padx=12, pady=(8, 12))
 
         right = ctk.CTkFrame(tab)
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=4)
-        ctk.CTkLabel(right, text="常用参数（点击填入）", font=ctk.CTkFont(size=15, weight="bold")).pack(
-            anchor="w", padx=10, pady=(10, 4)
+        right.grid_columnconfigure(0, weight=1)
+        right.grid_rowconfigure(1, weight=1)
+
+        head = ctk.CTkFrame(right, fg_color="transparent")
+        head.pack(fill="x", padx=10, pady=(10, 4))
+        ctk.CTkLabel(head, text="板端参数表", font=ctk.CTkFont(size=15, weight="bold")).pack(
+            side="left"
         )
-        scroll = ctk.CTkScrollableFrame(right, height=360)
-        scroll.pack(fill="both", expand=True, padx=8, pady=8)
-        for name in COMMON_PARAMS:
-            ctk.CTkButton(
-                scroll,
-                text=name,
-                anchor="w",
-                fg_color="transparent",
-                border_width=1,
-                command=lambda n=name: self._pick_param(n),
-            ).pack(fill="x", pady=2)
+        ctk.CTkButton(head, text="刷新", width=60, command=self._request_param_table).pack(
+            side="right", padx=2
+        )
+        self.param_status_lbl = ctk.CTkLabel(head, text="未拉取", text_color="gray")
+        self.param_status_lbl.pack(side="right", padx=8)
+
+        self.param_list_frame = ctk.CTkScrollableFrame(right, height=360)
+        self.param_list_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        self._rebuild_param_list()
 
     # -------------------------------------------------------------- 控制台
     def _build_console_tab(self) -> None:
@@ -588,6 +614,8 @@ class HostApp(ctk.CTk):
             self._send(cmd.help_cmd())
         except Exception:
             pass
+        # Pull param table after help traffic settles a bit.
+        self.after(250, self._request_param_table)
 
     def _reset_drive_state(self) -> None:
         """Clear local drive/WASD state after stop or disconnect."""
@@ -626,12 +654,13 @@ class HostApp(ctk.CTk):
         self.status_dot.set_state(False, error=error)
         self.status_lbl.configure(text="连接异常" if error else "未连接")
         self._reset_drive_state()
+        self._cancel_param_sync()
         self._log_ui(reason, "error" if error else "tx")
 
     def _on_close(self) -> None:
         self.cfg["poll_enabled"] = bool(self.poll_var.get())
         save_config(self.cfg)
-        for job in (self._poll_job, self._ui_job, self._jog_job):
+        for job in (self._poll_job, self._ui_job, self._jog_job, self._param_sync_job):
             if job is not None:
                 try:
                     self.after_cancel(job)
@@ -914,8 +943,15 @@ class HostApp(ctk.CTk):
                     pass
 
     # ---------------------------------------------------------------- param
-    def _pick_param(self, name: str) -> None:
+    def _pick_param(self, name: str, fetch: bool = True) -> None:
         self.param_name.set(name)
+        entry = self._params.get(name)
+        if entry is not None and entry.value:
+            self.param_value.set(entry.value)
+        if fetch and self.client.is_open:
+            # Refresh live value from board RAM.
+            self._send(cmd.param_get(name), silent=True)
+            self._log_ui(f"get {name}", "tx")
 
     def _param_get(self) -> None:
         name = self.param_name.get()
@@ -930,9 +966,188 @@ class HostApp(ctk.CTk):
             self._log_ui("参数名/值不能为空", "error")
             return
         self._send(cmd.param_set(name, value))
+        # Optimistic local cache update; confirmed by set terminal / ACK if any.
+        old = self._params.get(name)
+        self._params[name] = ParamEntry(
+            name=name,
+            type_name=old.type_name if old else "",
+            value=value,
+        )
+        self._rebuild_param_list()
 
     def _param_show(self) -> None:
+        """Console dump with optional filter prefix (does not replace the table)."""
         self._send(cmd.param_show(self.param_prefix.get()))
+
+    def _param_export_console(self) -> None:
+        self._send(cmd.param_export())
+
+    def _param_load(self) -> None:
+        self._send(cmd.param_load())
+        # Flash values applied on board; refresh table shortly after.
+        if self.client.is_open:
+            self.after(400, self._request_param_table)
+
+    # ------------------------------------------------------ param table sync
+    def _cancel_param_sync(self) -> None:
+        self._param_sync_active = False
+        self._param_sync_buf.clear()
+        self._param_sync_mode = ""
+        self._param_sync_seq = -1
+        if self._param_sync_job is not None:
+            try:
+                self.after_cancel(self._param_sync_job)
+            except Exception:
+                pass
+            self._param_sync_job = None
+
+    def _request_param_table(self) -> None:
+        """Send `show` and rebuild the right-hand list from board response."""
+        if not self.client.is_open:
+            self._log_ui("未连接，无法拉取参数表", "error")
+            return
+        self._cancel_param_sync()
+        self._param_sync_active = True
+        self._param_sync_mode = "show"
+        self._param_sync_buf = {}
+        self.param_status_lbl.configure(text="拉取中…", text_color="#f0ad4e")
+        try:
+            # Prefer seq so we can detect show ACK; lines are still collected from RX.
+            seq = self.client.send_raw(cmd.param_show(""), with_seq=True)
+            self._param_sync_seq = seq
+            self._log_ui(f"@{seq} show  [param table]", "tx")
+        except Exception as e:
+            self._cancel_param_sync()
+            self.param_status_lbl.configure(text="拉取失败", text_color="#e74c3c")
+            self._log_ui(f"拉取参数表失败: {e}", "error")
+            return
+        self._param_sync_job = self.after(PARAM_SYNC_TIMEOUT_MS, self._param_sync_timeout)
+
+    def _param_sync_timeout(self) -> None:
+        self._param_sync_job = None
+        if not self._param_sync_active:
+            return
+        n = len(self._param_sync_buf)
+        if n > 0:
+            self._finish_param_sync(ok=True, note=f"超时，已收 {n} 项")
+        else:
+            self._finish_param_sync(ok=False, note="超时无数据")
+
+    def _finish_param_sync(self, ok: bool, note: str = "") -> None:
+        buf = dict(self._param_sync_buf)
+        mode = self._param_sync_mode
+        self._param_sync_active = False
+        self._param_sync_mode = ""
+        self._param_sync_seq = -1
+        if self._param_sync_job is not None:
+            try:
+                self.after_cancel(self._param_sync_job)
+            except Exception:
+                pass
+            self._param_sync_job = None
+
+        if ok and buf:
+            # show replaces full table; export only merges storage keys if we ever use it.
+            if mode == "export" and self._params:
+                merged = dict(self._params)
+                for name, entry in buf.items():
+                    old = merged.get(name)
+                    merged[name] = ParamEntry(
+                        name=name,
+                        type_name=entry.type_name or (old.type_name if old else ""),
+                        value=entry.value if entry.value else (old.value if old else ""),
+                    )
+                self._params = merged
+            else:
+                self._params = buf
+            self._rebuild_param_list()
+            msg = note or f"已同步 {len(self._params)} 项"
+            self.param_status_lbl.configure(text=msg, text_color="#2ecc71")
+            self._log_ui(f"参数表: {msg}", "tx")
+        elif ok and not buf:
+            self.param_status_lbl.configure(text="空表", text_color="gray")
+            self._log_ui("参数表: 板端无参数或解析失败", "error")
+        else:
+            self.param_status_lbl.configure(text=note or "失败", text_color="#e74c3c")
+            if note:
+                self._log_ui(f"参数表: {note}", "error")
+
+    def _rebuild_param_list(self) -> None:
+        frame = getattr(self, "param_list_frame", None)
+        if frame is None:
+            return
+        for child in frame.winfo_children():
+            child.destroy()
+
+        prefix = ""
+        if hasattr(self, "param_prefix"):
+            prefix = self.param_prefix.get()
+
+        names = sorted(self._params.keys())
+        if prefix:
+            names = [n for n in names if n.startswith(prefix)]
+
+        if not names:
+            tip = "连接后自动拉取，或点「刷新」"
+            if self._params and prefix:
+                tip = f"无匹配前缀 “{prefix}” 的参数"
+            ctk.CTkLabel(frame, text=tip, text_color="gray").pack(anchor="w", padx=6, pady=8)
+            return
+
+        for name in names:
+            entry = self._params[name]
+            type_s = f"  [{entry.type_name}]" if entry.type_name else ""
+            val_s = f"  = {entry.value}" if entry.value else ""
+            label = f"{name}{type_s}{val_s}"
+            ctk.CTkButton(
+                frame,
+                text=label,
+                anchor="w",
+                fg_color="transparent",
+                border_width=1,
+                command=lambda n=name: self._pick_param(n),
+            ).pack(fill="x", pady=2)
+
+    def _upsert_param(self, entry: ParamEntry, rebuild: bool = False) -> None:
+        if not entry.name:
+            return
+        old = self._params.get(entry.name)
+        self._params[entry.name] = ParamEntry(
+            name=entry.name,
+            type_name=entry.type_name or (old.type_name if old else ""),
+            value=entry.value if entry.value != "" else (old.value if old else ""),
+        )
+        if rebuild:
+            self._rebuild_param_list()
+
+    def _feed_param_sync_line(self, line: str) -> None:
+        if not self._param_sync_active:
+            return
+
+        if self._param_sync_mode == "show":
+            row = parse_show_param_row(line)
+            if row is not None:
+                self._param_sync_buf[row.name] = row
+                return
+            end = parse_show_end(line)
+            if end is not None:
+                self._finish_param_sync(ok=True, note=f"共 {end[1]} 项 (shown={end[0]})")
+                return
+        elif self._param_sync_mode == "export":
+            row = parse_export_kv(line)
+            if row is not None:
+                self._param_sync_buf[row.name] = row
+                return
+            n = parse_export_end(line)
+            if n is not None:
+                self._finish_param_sync(ok=True, note=f"export {n} 项")
+                return
+
+    def _apply_param_value_update(self, entry: ParamEntry) -> None:
+        """Update cache + value entry when get/set reports a value."""
+        self._upsert_param(entry, rebuild=True)
+        if self.param_name.get() == entry.name and entry.value != "":
+            self.param_value.set(entry.value)
 
     # ----------------------------------------------------------------- WASD
     def _on_key_press(self, event) -> None:
@@ -1105,6 +1320,19 @@ class HostApp(ctk.CTk):
     def _handle_rx_line(self, line: str) -> None:
         if "{motor_l}" in line:
             return
+
+        # Feed dynamic param table collector (before status filtering).
+        self._feed_param_sync_line(line)
+
+        # Live get/set terminal lines update cache + value box.
+        got = parse_get_terminal(line)
+        if got is not None:
+            self._apply_param_value_update(got)
+        else:
+            setted = parse_set_terminal(line)
+            if setted is not None:
+                self._apply_param_value_update(setted)
+
         is_status = "chassis:" in line or "Left:" in line or "Right:" in line
         # Hide background poll noise, but show manual status replies.
         if self.poll_var.get() and is_status:
@@ -1124,6 +1352,26 @@ class HostApp(ctk.CTk):
     def _handle_ack(self, ack: Ack) -> None:
         if ack.ok and ack.ctx == "status_printed":
             return
+
+        # show ACK: count=N — finish sync if still waiting (rows may already be done via shown=).
+        if (
+            self._param_sync_active
+            and self._param_sync_mode == "show"
+            and ack.ok
+            and (self._param_sync_seq < 0 or ack.seq == self._param_sync_seq)
+        ):
+            fields = parse_ctx_fields(ack.ctx)
+            if "count" in fields:
+                n = len(self._param_sync_buf)
+                total = fields["count"]
+                self._finish_param_sync(ok=True, note=f"共 {total} 项" if n == 0 else f"共 {n} 项")
+
+        # get ACK ctx carries structured value.
+        if ack.ok and ack.ctx:
+            pa = parse_param_ack_ctx(ack.ctx)
+            if pa is not None:
+                self._apply_param_value_update(pa)
+
         kind = "ack_ok" if ack.ok else "ack_err"
         extra = f" ctx={ack.ctx}" if ack.ctx else ""
         self._log_ui(f"seq={ack.seq} {ack.result}{extra}", kind)

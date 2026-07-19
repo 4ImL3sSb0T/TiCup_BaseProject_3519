@@ -54,7 +54,8 @@ uv run python -m host --self-check   # 无硬件，协议解析自检
    - **WASD** 遥控；**空格** 急停  
 
 4. **改参**（「参数」Tab）  
-   - `set` 只改 RAM  
+   - 连接后自动从板端 `show` 拉取参数表（右侧列表，可「刷新」）  
+   - 点参数行填入名/值；`set` 只改 RAM  
    - 电机：`set motor_kp …` → **应用 motor param**  
    - 底盘：`set chassis_* …` → **应用 chassis param**  
    - 持久化：`save`；重载：`load`  
