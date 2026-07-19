@@ -2,8 +2,8 @@
  * @file motor.c
  * @brief 双电机控制模块（DRV8701：DIR + PWM）
  *
- * 引脚：主板有刷电机座 — 左 B8/B10，右 B12/B13（TIM_A0）
- * 编码器：E2_01_encoder_quadrature_demo
+ * 电机：MG310 霍尔；引脚：主板有刷电机座 — 左 B8/B10，右 B12/B13（TIM_A0）
+ * 编码器：E2_01_encoder_quadrature_demo（正交）
  * 命令 mask: bit0=左电机, bit1=右电机
  */
 #include "motor.h"
@@ -16,8 +16,12 @@
 #include <stdbool.h>
 #include <math.h>
 
-static float motor_speed_pid_kp = 22.0f;
-static float motor_speed_pid_ki = 25.0f;
+/*
+ * 速度单位改为 counts/2ms（满量程约 20）后，原 kp/ki 相对「大速度单位」会偏弱。
+ * 初值：error≈5 → P 约 500~600 duty；I 负责抬到额定区。串口 set motor_kp/ki 再精调。
+ */
+static float motor_speed_pid_kp = 120.0f;
+static float motor_speed_pid_ki = 200.0f;
 
 /* 左电机 + 左编码器 */
 motor_t motor_left = {
@@ -82,8 +86,14 @@ exit_code_t motor_init(void)
 {
     uint8 i;
 
-    sys_log_text(info, "Motor: init dual DRV8701 (pwm=%uHz)...",
-                 (unsigned)MOTOR_PWM_FREQ_HZ);
+    sys_log_text(info, "Motor: MG310 hall init (pwm=%uHz, duty_max=%d, spd_max=%.1f c/2ms)...",
+                 (unsigned)MOTOR_PWM_FREQ_HZ, (int)MOTOR_MAX_DUTY,
+                 (double)MOTOR_MAX_TARGET_SPEED);
+    sys_log_text(info,
+                 "Motor: gear=%.3f enc=%dx%d counts/rev≈%.0f supply≈%.1fV rated=%.1fV",
+                 (double)MOTOR_GEAR_RATIO, (int)MOTOR_ENC_LINES, (int)MOTOR_ENC_QUAD,
+                 (double)MOTOR_COUNTS_PER_OUT_REV,
+                 (double)MOTOR_SUPPLY_VOLT_V, (double)MOTOR_RATED_VOLT_V);
 
     sys_log_text(info, "Motor: init encoders...");
     encoder_init();

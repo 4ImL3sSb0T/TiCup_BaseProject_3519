@@ -2,8 +2,13 @@
  * @file motor.h
  * @brief 电机控制模块（双电机，DRV8701：DIR + PWM）
  *
+ * 电机：MG310 霍尔编码器版（减速比 1:20.409，额定 7.4 V，可用 7~13 V）
+ * 供电：约 12 V；PWM 限幅按等效额定电压折算（7.4/12）
+ * 速度单位：编码器脉冲 / 2ms 控制周期（与 encoder_update + motor_update 一致）
  * 引脚参考：E3_04_drv8701e_double_motor_contro_demo（MSPM0G3519 / 逐飞主板）
  * 命令 mask：bit0=左, bit1=右（0x1/0x2/0x3）
+ *
+ * 注意：不可长时间堵转（堵转电流 ≤2 A）。
  */
 #ifndef __MOTOR_H
 #define __MOTOR_H
@@ -18,11 +23,38 @@
 extern "C" {
 #endif
 
-#define MOTOR_MAX_TARGET_SPEED              250.0f
-#define MOTOR_MAX_DUTY                      3500
+/* --------------------------------------------------------------------------
+ * MG310 本体 / 编码器（霍尔 13 线 AB 相，TIM 正交 ×4，计数在电机轴）
+ *   counts/输出轴一圈 ≈ 13 × 4 × 20.409 ≈ 1061
+ *   空载 ~500 RPM → 约 17.7 counts/2ms；额定 ~400 RPM → 约 14.2
+ * 若实车手转一圈 position 与 1061 差很多，以实测改 LINES / GEAR 后重算限幅。
+ * -------------------------------------------------------------------------- */
+#define MOTOR_GEAR_RATIO                    (20.409f)
+#define MOTOR_ENC_LINES                     (13)
+#define MOTOR_ENC_QUAD                      (4)
+#define MOTOR_COUNTS_PER_OUT_REV \
+    (MOTOR_ENC_LINES * MOTOR_ENC_QUAD * MOTOR_GEAR_RATIO)
+
+/** 12 V 供电下等效额定 7.4 V：duty ≈ 7.4/12 * PWM_DUTY_MAX(10000) ≈ 6167 */
+#define MOTOR_SUPPLY_VOLT_V                 (12.0f)
+#define MOTOR_RATED_VOLT_V                  (7.4f)
+
+/**
+ * 速度目标上限（counts/2ms），略高于空载估算 17.7
+ * 开环/速度环 set 建议先 5~12，再往上摸
+ */
+#define MOTOR_MAX_TARGET_SPEED              (20.0f)
+
+/**
+ * PWM 占空比上限（相对 PWM_DUTY_MAX=10000）
+ * 约 62% × 12 V ≈ 7.4 V 额定；短时冲速可 param/改宏到 8000，勿长期满占空堵转
+ */
+#define MOTOR_MAX_DUTY                      (6200)
+
 #define MOTOR_DEADZONE_CALIBRATE_TIME_MS    500
 #define MOTOR_DEADZONE_CALIBRATE_STEP       1
-#define MOTOR_DEADSPEED_THRESHOLD_DEFAULT   2.0f
+/** 速度环近零/死区阈值（counts/2ms）；霍尔分辨率低，1~2 较合适 */
+#define MOTOR_DEADSPEED_THRESHOLD_DEFAULT   (1.5f)
 
 /** PWM 频率，与逐飞 DRV8701 例程一致 */
 #define MOTOR_PWM_FREQ_HZ                   17000U

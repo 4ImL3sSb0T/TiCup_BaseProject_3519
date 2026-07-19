@@ -24,20 +24,23 @@ extern "C" {
 /** 底盘控制周期 (s)，与 main 中 10ms soft_timer 一致 */
 #define CHASSIS_DT_S                    (0.01f)
 
-/** 默认半轮距（与轮速同单位，抽象量，靠 param 标定） */
+/**
+ * 轮速与 motor 同单位：counts/2ms（MG310 霍尔空载约 18）
+ * half_track / omega 仍为抽象量，靠 param 实车标定
+ */
 #define CHASSIS_HALF_TRACK_DEFAULT      (2.0f)
-#define CHASSIS_MAX_V_DEFAULT           (250.0f)
-#define CHASSIS_MAX_OMEGA_DEFAULT       (80.0f)
+#define CHASSIS_MAX_V_DEFAULT           (18.0f)
+#define CHASSIS_MAX_OMEGA_DEFAULT       (12.0f)
 
-/** 开环：v/ω 映射到 duty 的比例初值 */
-#define CHASSIS_OL_V_SCALE_DEFAULT      (20.0f)
-#define CHASSIS_OL_W_SCALE_DEFAULT      (15.0f)
+/** 开环：v/ω → duty；约 MOTOR_MAX_DUTY/CHASSIS_MAX_V ≈ 6200/18 */
+#define CHASSIS_OL_V_SCALE_DEFAULT      (340.0f)
+#define CHASSIS_OL_W_SCALE_DEFAULT      (250.0f)
 
 /**
  * IMU 角速度(deg/s) → 运动学 ω（轮速单位）的桥接系数
  * wheel_omega = imu_omega_deg_s * chassis_omega_to_wheel
  */
-#define CHASSIS_OMEGA_TO_WHEEL_DEFAULT  (0.5f)
+#define CHASSIS_OMEGA_TO_WHEEL_DEFAULT  (0.15f)
 
 /** IMU 航向/角速度符号：实车反向时改为 -1 */
 #define CHASSIS_IMU_YAW_SIGN_DEFAULT    (1.0f)
