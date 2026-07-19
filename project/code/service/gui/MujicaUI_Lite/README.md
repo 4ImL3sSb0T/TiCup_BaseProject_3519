@@ -150,7 +150,7 @@ flowchart LR
 
 ### 快速接入（与本工程 `main` 风格一致）
 
-当前 `main.c` **尚未接入 GUI**。按键脚已与主板/电机对齐（A30/A31/B0/B1），可直接接线验证。
+当前已通过 `gui_app_init()` 接入 `main.c`（按键 A30/A31/B0/B1 + IPS200）。菜单定义见 `service/gui/gui_app.c`。
 
 ```c
 #include "service/gui/MujicaUI_Lite/mjc_core.h"

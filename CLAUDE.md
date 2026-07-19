@@ -31,9 +31,9 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 ### Boot flow
 
 1. `clock_init(SYSTEM_CLOCK_80M)` + `debug_init()`
-2. event / soft_timer / log(UART0) / **fs_init (LFS)** / param_init / cmd / **motor+encoder** / imu / **chassis** / **param_load**
+2. event / soft_timer / log(UART0) / **fs_init (LFS)** / param_init / cmd / **motor+encoder** / imu / **chassis** / **param_load** / **gui_app**
 3. `pit_ms_init(PIT_TIM_G12, 1, ...)` 系统 1ms
-4. soft_timer：imu 1ms / motion 2ms / chassis 10ms / cmd 20ms / LED 500ms + `event_process_async()` 主循环
+4. soft_timer：imu 1ms / motion 2ms / **GUI 按键 5ms** / chassis 10ms / cmd 20ms / **GUI 刷新 100ms** / LED 500ms + `event_process_async()` 主循环
 
 ### Hardware (current)
 
@@ -46,6 +46,7 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 | LED | A14（500ms 心跳） |
 | 命令/日志 | **UART0（A10/A11）**；无线 UART1 暂关；WiFi SPI 暂不可用 |
 | IMU | SPI1：B23/B22/B21 + CS B19 |
+| GUI | IPS200 SPI0（A12/A9/A7/A15/A8/A13）+ 按键 A30/A31/B0/B1 |
 | 参数持久化 | LittleFS `/param.txt`（key=value），DATA Flash via `bsp_flash`（非 MAIN `storage`） |
 
 **尽量不要使用的引脚（核心板官方 · 重点）**：**A19、A20、A5、A6、A4、A3**（特殊功能脚，占用可能导致核心板异常）；**A14** 优先留给板载 LED。  

@@ -27,6 +27,7 @@
 | 命令串口 | `project/code/service/com/cmd_service.c` |
 | 日志通道 | `project/code/service/sys/sys_log.c` / `sys_log.h` |
 | 参数 / LFS | `project/code/service/com/param.*`、`service/fs/fs_service.*`、`bsp/flash` |
+| GUI 应用 | `project/code/service/gui/gui_app.c` |
 | GUI 按键 | `project/code/service/gui/MujicaUI_Lite/mjc_input_button.c` |
 | 无线转串口 | `libraries/zf_device/zf_device_wireless_uart.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
@@ -53,6 +54,8 @@
 | ~~无线转串口~~ | ~~UART1~~ | ~~B6 / B7 / B2~~ | **暂关闭**（B7 给右编码器） | — |
 | ~~命令/日志 WiFi SPI~~ | SPI0 | — | **暂不可用**，勿接线依赖 | — |
 | IMU | SPI1 | B23/B22/B21 + CS B19 | IMU963RA 默认 SPI | E4_03_imu963ra |
+| **GUI 屏 IPS200** | **SPI0** | **A12 SCK / A9 MOSI / A7 RST / A15 DC / A8 CS / A13 BLK** | `gui_app_init` → MujicaUI | 库默认 |
+| **GUI 按键** | GPIO | **A30 / A31 / B0 / B1** | UP/DOWN/MAIN/AUX | 主板丝印 |
 | 参数持久化 | LittleFS（片内 **DATA Flash**） | —（无 GPIO） | `/param.txt` key=value；`fs_service` + `bsp_flash`；**非** MAIN `storage` 扇区 | — |
 
 电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`。
@@ -95,10 +98,17 @@
 |------|------|
 | A0 | 左电机 PWM |
 | A1 | 左电机 DIR |
+| **A7** | **IPS200 RST** |
+| **A8** | **IPS200 CS** |
+| **A9** | **IPS200 MOSI（SPI0）** |
 | A10 | UART0 TX（命令 + 日志） |
 | A11 | UART0 RX（命令 + 日志） |
+| **A12** | **IPS200 SCK（SPI0）** |
+| **A13** | **IPS200 BLK** |
 | A14 | **核心板 LED**（心跳） |
+| **A15** | **IPS200 DC** |
 | A26 / A27 | 左编码器 A/B |
+| **A30 / A31 / B0 / B1** | **GUI 板载按键**（UP/DOWN/MAIN/AUX；与 `KEY_LIST` 一致） |
 | **B7** | **右编码器 CH1**（TIM_G9） |
 | B9 | 右编码器 CH2 |
 | B12 | 右电机 PWM |
@@ -107,14 +117,13 @@
 | B21 | IMU SPI1 MISO |
 | B22 | IMU SPI1 MOSI |
 | B23 | IMU SPI1 SCK |
-| **A30 / A31 / B0 / B1** | **GUI 板载按键**（UP/DOWN/MAIN/AUX；与 `KEY_LIST` 一致） |
 
 ### 3.1b 暂释放（代码保留宏，main 未 init）
 
 | 引脚 | 原功能 | 说明 |
 |------|--------|------|
 | B6 / B2 | 无线串口 TX / RTS | 无线暂关；**B7 已改给编码器** |
-| A9 / A12 / A13 / A16 / A17 / B20 | WiFi SPI | **模块暂不可用** |
+| A16 / A17 / B20 | WiFi SPI 侧 CS/RST/INT | **模块暂不可用**；**A9/A12/A13 已给 IPS200** |
 
 ### 3.2 核心板「尽量不要使用的引脚」（重点 · 官方）
 
@@ -151,7 +160,7 @@
 |------|------|------------|
 | **无线 RX vs 右编码器 CH1** | **B7** | **当前优先底盘**：B7=右编码器 CH1；无线 UART1 **暂不 init**（`SYS_LOG_UART` + `CMD_SERVICE_ENABLE_WIRELESS=0`）。恢复无线须改编码器脚或关底盘。 |
 | **UART3 暂禁用** | A14/A13 | 原命令串口 UART3 已关闭；A14 给 LED。 |
-| **WiFi SPI 暂不可用** | SPI0 组 | 勿依赖 `SYS_LOG_WIFI` / `wifi_spi_read_buffer`。 |
+| **WiFi SPI 暂不可用** | SPI0 组 | 屏已占用 SPI0 数据线（A12/A9/A13 等）；勿依赖 `SYS_LOG_WIFI`。 |
 | **SPI0 总线** | A9/A12/A13… | WiFi SPI 与 IPS 屏常共用 SPI0 不同 CS。 |
 | **3519 无 UART2** | — | 原 3507 的 UART2 场景改 **UART7** 或其它实例。 |
 | ~~右电机 vs GUI 按键~~ | ~~B12/B13~~ | **已消除**：按键已改主板 **A30/A31/B0/B1** |
@@ -246,10 +255,20 @@
 
 同组脚也用于 660RA/RB/RC 等模块，**主板 IMU 座固定时勿改**。
 
-### 6.2 显示屏（库默认，本工程未必初始化）
+### 6.2 显示屏 IPS200（**已启用** `gui_app_init`）
 
-典型 IPS200 SPI：`SPI0`，SCK A12，MOSI A9，RST A7，DC A15，CS A8，BLK A13 等。  
-**启用 GUI 前**：对照 §3 占用表，避免与 WiFi / 电机冲突。
+| 信号 | 引脚 |
+|------|------|
+| SCK | A12 (`SPI0`) |
+| MOSI | A9 |
+| RST | A7 |
+| DC | A15 |
+| CS | A8 |
+| BLK | A13 |
+
+- 入口：`project/code/service/gui/gui_app.c` → `mjc_init` / `mjc_hal`（默认竖屏 240×320）。
+- 与 WiFi SPI 共用 SPI0 数据线；**WiFi 保持暂关**。
+- 刷新：100ms soft_timer `mjc_update`；按键扫描 5ms。
 
 ### 6.3 GUI 按键（主板板载键，已与电机共存）
 
@@ -263,6 +282,7 @@
 - 源码：`mjc_input_button.c` 的 `s_button_pins`；与 `zf_device_key.h` 的 `KEY_LIST {A30,A31,B0,B1}` 及主板丝印一致。
 - 电平：上拉输入，**低电平有效**（`MJC_BUTTON_ACTIVE_LEVEL=0`）。
 - 旧例程脚 B13/B12/B14/B15 **已废弃**，勿再使用。
+- 菜单：根页 Chassis / Save Params；Chassis 下 Stop、IDLE。
 
 ---
 
@@ -274,8 +294,10 @@
 |------|------|
 | 1 ms | `imu_update` |
 | 2 ms | `encoder_update` + `motor_update` |
+| 5 ms | `mjc_buttons_tick_5ms`（GUI 按键） |
 | 10 ms | `chassis_update` |
 | 20 ms | `cmd_service_task` |
+| 100 ms | `mjc_update`（GUI 刷新） |
 | 500 ms | LED 心跳 `gpio_toggle_level(A14)` |
 
 主循环：`soft_timer_process()` + `event_process_async()`。
@@ -300,6 +322,7 @@
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-19 | **启用 GUI**：`gui_app_init`（IPS200 SPI0 + 按键 A30/A31/B0/B1；5ms/100ms soft_timer） |
 | 2026-07-19 | **GUI 按键改主板** A30/A31/B0/B1；消除与右电机 B12/B13 冲突；补充主板电机座 PWM 备选（B8/B10/B11） |
 | 2026-07-19 | **启用底盘/电机/编码器**；**无线 UART1 暂关**（B7→右编码器）；命令/日志仅 UART0 |
 | 2026-07-19 | **重点写入**官方「尽量不要使用的引脚」：A19/A20/A5/A6/A4/A3（E01_gpio_demo 原文）+ A14 LED 保留；强制规则与改脚清单同步 |

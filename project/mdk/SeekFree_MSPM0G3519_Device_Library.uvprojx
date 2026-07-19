@@ -540,6 +540,16 @@
               <FilePath>..\code\service\imu\MadgwickAHRS\MadgwickAHRS.h</FilePath>
             </File>
             <File>
+              <FileName>gui_app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\service\gui\gui_app.c</FilePath>
+            </File>
+            <File>
+              <FileName>gui_app.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\gui\gui_app.h</FilePath>
+            </File>
+            <File>
               <FileName>multi_button.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\service\gui\multi_button.c</FilePath>

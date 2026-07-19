@@ -26,6 +26,7 @@
 #include "service/motion/encoder.h"
 #include "service/motion/chassis.h"
 #include "service/imu/imu.h"
+#include "service/gui/gui_app.h"
 
 /*
  * 硬件资源划分 —— 权威文档：docs/hardware.md（改脚前必读并回写）
@@ -36,12 +37,15 @@
  *   - 无线转串口 UART1（B6/B7/B2）: 暂关闭（B7 给右编码器）
  *   - 核心板 LED: A14
  *   - IMU: SPI1（B23/B22/B21 + CS B19）
+ *   - GUI: IPS200 SPI0（A12/A9/A7/A15/A8/A13）+ 按键 A30/A31/B0/B1
  *
  * 多速率任务:
  *   - 1ms  soft: imu_update
  *   - 2ms  soft: encoder + motor
+ *   - 5ms  soft: GUI 按键扫描（gui_app）
  *   - 10ms soft: chassis 外环
  *   - 20ms soft: 命令服务
+ *   - 100ms soft: GUI 刷新（gui_app）
  *   - 500ms soft: 核心板 LED 心跳（A14）
  */
 
@@ -118,13 +122,14 @@ static void app_init(void)
     /*
      * 初始化顺序（按依赖）：
      *   clock/debug/dwt → log → event → soft_timer → fs → param → cmd
-     *   → motor(+encoder) → imu → chassis → param_load → 节拍与周期任务
+     *   → motor(+encoder) → imu → chassis → param_load → GUI → 节拍与周期任务
      *
      * 注意：
      *   - event_init() 内会调 sys_log_text；log 须先 init。
      *   - soft_timer 创建/启动依赖 event。
      *   - 当前 SYS_LOG_UART：不 init 无线，B7 留给右编码器。
      *   - param_load 须在全部 param_add（motor/chassis）之后。
+     *   - GUI 占用 SPI0 屏脚；WiFi SPI 仍暂关。
      */
     /* 1. 基础时钟 / 调试串口 / 周期计数 */
     clock_init(SYSTEM_CLOCK_80M);
@@ -193,21 +198,28 @@ static void app_init(void)
         sys_log_text(warning, "param_load boot failed (using defaults)");
     }
 
-    /* 13. 1ms 系统节拍 */
+    /* 13. GUI：IPS200 + 板载按键（自建 5ms/100ms soft_timer） */
+    if (gui_app_init() != EXIT_OK) {
+        sys_log_text(error, "gui_app_init failed");
+    } else {
+        sys_log_text(info, "gui_app_init ok");
+    }
+
+    /* 14. 1ms 系统节拍 */
     pit_ms_init(SYS_TICK_PIT, 1, pit_1ms_callback, NULL);
     sys_log_text(info, "sys tick 1ms on PIT_G12");
 
-    /* 14. 周期任务 */
+    /* 15. 周期任务 */
     (void)app_start_timer(CMD_POLL_INTERVAL_MS, cmd_service_task, "cmd");
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
     (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
-    /* 15. 开全局中断 */
+    /* 16. 开全局中断 */
     interrupt_global_enable(0);
 
-    sys_log_text(info, "init done. try: help / chassis status / motor (UART0)");
+    sys_log_text(info, "init done. try: help / chassis status / motor (UART0); GUI keys A30/A31/B0/B1");
 }
 
 int main(void)
