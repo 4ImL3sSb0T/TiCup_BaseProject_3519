@@ -23,6 +23,8 @@ uv run python -m host --port COM8
 uv run python -m host --self-check   # 无硬件，协议解析自检
 ```
 
+UI 结构（`host/ui/`）：`app.py` 壳 + 连接/分发；`tabs/` 驾驶·电机·参数·控制台；`plot.py` 遥测曲线。
+
 上次使用的 COM 口保存在 `host/host_config.json`（已 gitignore）。
 
 ---
