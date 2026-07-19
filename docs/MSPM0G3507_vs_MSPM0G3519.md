@@ -147,8 +147,8 @@ UART_0, UART_1, /* 无 UART_2 */, UART_3, UART_4, UART_5, UART_6, UART_7
 
 | 资源 | 配置 |
 |------|------|
-| 电机左 | DIR=`A1`，PWM=`PWM_TIM_A0_CH0_A0` |
-| 电机右 | DIR=`B13`，PWM=`PWM_TIM_A0_CH2_B12` |
+| 电机左 | DIR=`B10`，PWM=`PWM_TIM_A0_CH0_B8`（主板电机座） |
+| 电机右 | DIR=`B13`，PWM=`PWM_TIM_A0_CH2_B12`（主板电机座） |
 | 编码器左 | TIM_G8，CH1=`A26`，CH2=`A27`（正交） |
 | 编码器右 | TIM_G9，CH1=`B7`，CH2=`B9`（正交） |
 | 系统 1ms | `PIT_TIM_G12` |

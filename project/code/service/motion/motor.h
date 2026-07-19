@@ -28,12 +28,13 @@ extern "C" {
 #define MOTOR_PWM_FREQ_HZ                   17000U
 
 /* --------------------------------------------------------------------------
- * DRV8701 引脚（主板灰排线，与官方例程代码宏一致）
- *   MOTOR1 左: DIR=A1,  PWM=PWM_TIM_A0_CH0_A0
- *   MOTOR2 右: DIR=B13, PWM=PWM_TIM_A0_CH2_B12
+ * DRV8701 引脚（3507 主板「有刷电机」座，灰排线）
+ *   座上可用：B8 B9 B12 B13 B10 B11 A26 A27
+ *   本工程：左 B8 PWM + B10 DIR；右 B12 PWM + B13 DIR
+ *   避开：B9/A26/A27（正交编码器）、B11 预留
  * -------------------------------------------------------------------------- */
-#define MOTOR_LEFT_PWM                      (PWM_TIM_A0_CH0_A0)
-#define MOTOR_LEFT_DIR                      (A1)
+#define MOTOR_LEFT_PWM                      (PWM_TIM_A0_CH0_B8)
+#define MOTOR_LEFT_DIR                      (B10)
 
 #define MOTOR_RIGHT_PWM                     (PWM_TIM_A0_CH2_B12)
 #define MOTOR_RIGHT_DIR                     (B13)

@@ -2,7 +2,7 @@
  * @file motor.c
  * @brief 双电机控制模块（DRV8701：DIR + PWM）
  *
- * 引脚：E3_04_drv8701e_double_motor_contro_demo
+ * 引脚：主板有刷电机座 — 左 B8/B10，右 B12/B13（TIM_A0）
  * 编码器：E2_01_encoder_quadrature_demo
  * 命令 mask: bit0=左电机, bit1=右电机
  */
@@ -96,7 +96,7 @@ exit_code_t motor_init(void)
         motor_init_single(motor_list[i]);
     }
 
-    sys_log_text(info, "Motor: L=PWM A0 + DIR A1, R=PWM B12 + DIR B13");
+    sys_log_text(info, "Motor: L=PWM B8 + DIR B10, R=PWM B12 + DIR B13 (motherboard motor hdr)");
     return EXIT_OK;
 }
 
