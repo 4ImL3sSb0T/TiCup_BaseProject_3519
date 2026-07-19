@@ -197,9 +197,11 @@ static void app_init(void)
         }
     }
 
-    /* 12. 全部 param_add 完成后从 LFS /param.txt 恢复 */
+    /* 12. 全部 param_add 完成后从 LFS /param.txt 恢复
+     *     param_load 成功时内部会 motor_apply_param()；失败则仍用 motor_init 默认 PID */
     if (param_load("boot") != 0) {
         sys_log_text(warning, "param_load boot failed (using defaults)");
+        motor_apply_param(); /* 仍把当前 RAM 注册表（默认）刷进 PID */
     }
 
     /* 13. GUI：IPS200 + 板载按键（自建 5ms/100ms soft_timer） */

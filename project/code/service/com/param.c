@@ -9,6 +9,7 @@
 #include "service/fs/fs_service.h"
 #include "service/lfs/lfs.h"
 #include "service/lfs/lfs_port.h"
+#include "service/motion/motor.h"
 #include "service/sys/sys_log.h"
 #include "zf_common_interrupt.h"
 #include "zf_common_typedef.h"
@@ -736,6 +737,9 @@ int param_load(const char *flash_tag)
     (void)lfs_file_close(lfs, &file);
     sys_log_text(info, "param_load[%s]: restored=%u skipped=%u from %s",
                  tag, (unsigned)restored, (unsigned)skipped, FS_PARAM_PATH);
+
+    /* 注册表已更新；把 motor_kp/ki 同步进速度环 PID（含积分限） */
+    motor_apply_param();
     return 0;
 }
 

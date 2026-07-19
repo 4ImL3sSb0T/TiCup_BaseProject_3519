@@ -47,14 +47,15 @@ extern "C" {
 
 /**
  * PWM 占空比上限（相对 PWM_DUTY_MAX=10000）
- * 约 62% × 12 V ≈ 7.4 V 额定；短时冲速可 param/改宏到 8000，勿长期满占空堵转
+ * 约 72% × 12 V ≈ 8.6 V（略高于 7.4 V 额定，便于短时加速）
+ * 勿长期满占空堵转（堵转电流大）
  */
-#define MOTOR_MAX_DUTY                      (6200)
+#define MOTOR_MAX_DUTY                      (9500)
 
 #define MOTOR_DEADZONE_CALIBRATE_TIME_MS    500
 #define MOTOR_DEADZONE_CALIBRATE_STEP       1
-/** 速度环近零/死区阈值（counts/2ms）；霍尔分辨率低，1~2 较合适 */
-#define MOTOR_DEADSPEED_THRESHOLD_DEFAULT   (1.5f)
+/** 速度环近零/误差死区（counts/2ms）；过大会导致稳态欠调、提前冻住 PID */
+#define MOTOR_DEADSPEED_THRESHOLD_DEFAULT   (0.4f)
 
 /** PWM 频率，与逐飞 DRV8701 例程一致 */
 #define MOTOR_PWM_FREQ_HZ                   17000U
@@ -111,6 +112,9 @@ void motor_set_target_speed(motor_t *motor, float speed);
 void motor_set_target_pwm(motor_t *motor, int32 pwm);
 void motor_update(void);
 void motor_update_single(motor_t *motor);
+
+/** 将 motor_kp/ki 写入速度环，并同步积分限（set/load 后调用） */
+void motor_apply_param(void);
 
 exit_code_t motor_calibrate_deadzone(void);
 int32 motor_get_deadzone(motor_t *motor);

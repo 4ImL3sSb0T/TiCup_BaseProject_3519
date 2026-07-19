@@ -52,6 +52,8 @@
 | 参数持久化 | DATA Flash + LFS | — | `/param.txt`；非 MAIN `storage` |
 
 - 电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`
+- 电机 duty 上限：`MOTOR_MAX_DUTY = 7200`（勿长期满占空堵转）
+- 速度环误差死区：`MOTOR_DEADSPEED_THRESHOLD_DEFAULT = 0.4`（counts/2ms）
 - 电机座物理分组（M1–M4）见 **`motherboard_3507_pinout.md`**；本文只记本工程接了哪两组。
 
 ---

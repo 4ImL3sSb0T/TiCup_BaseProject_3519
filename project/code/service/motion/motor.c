@@ -311,12 +311,16 @@ void motor_update_single(motor_t *motor)
     motor_set_duty(motor, (int32)duty);
 }
 
-static void motor_update_param(void)
+void motor_apply_param(void)
 {
     uint8 i;
+
     for (i = 0; i < MOTOR_COUNT; i++) {
-        motor_list[i]->speed_pid.kp = motor_speed_pid_kp;
-        motor_list[i]->speed_pid.ki = motor_speed_pid_ki;
+        /* 同步 kp/ki，并按新 ki 重算 integral_min/max（output 限幅不变） */
+        pid_update_params(&motor_list[i]->speed_pid,
+                          motor_speed_pid_kp,
+                          motor_speed_pid_ki,
+                          0.0f);
     }
 }
 
@@ -512,7 +516,7 @@ cmd_exec_result_t motor_command_handler(i32 seq, int argc, char **argv)
             motor_set_mode(motor, mode);
             sys_log_text(terminal, "%s mode -> %s", motor_name, param_arg);
         } else if (strcmp(cmd_arg, "param") == 0) {
-            motor_update_param();
+            motor_apply_param();
             sys_log_text(terminal, "PID params applied kp=%.2f ki=%.2f",
                          motor_speed_pid_kp, motor_speed_pid_ki);
         } else {

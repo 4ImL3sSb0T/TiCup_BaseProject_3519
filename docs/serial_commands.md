@@ -194,7 +194,7 @@ motor <mask> <stop|set|mode|status|param> [val]
 |------|-------------------|
 | `speed`（默认） | 编码器 counts/2ms；建议先 **5~12**，上限约 20 |
 | `position` | 目标位置（编码器计数） |
-| `openloop` | PWM duty（整数）；限幅约 **6200**（≈7.4 V @12 V） |
+| `openloop` | PWM duty（整数）；限幅约 **7200**（≈8.6 V @12 V，勿长期堵转） |
 
 ### 示例
 
