@@ -48,6 +48,9 @@ TI 杯基地项目 —— **MSPM0G3519** (ARM Cortex-M0+) 版本，由 `BaseProj
 | 命令/日志 | **无线串口 UART1：B6 TX / B7 RX / B2 RTS** + UART0（WiFi SPI 暂不可用） |
 | IMU | SPI1：B23/B22/B21 + CS B19 |
 
+**尽量不要使用的引脚（核心板官方 · 重点）**：**A19、A20、A5、A6、A4、A3**（特殊功能脚，占用可能导致核心板异常）；**A14** 优先留给板载 LED。  
+来源：`MSPM0G3519_Library-master\Example\Coreboard_Demo\E01_gpio_demo\尽量不要使用的引脚.txt`；工程约定见 `docs/hardware.md` §3.2。
+
 ## 3519 注意
 
 - **无 UART2**，兼容引脚用 **UART7**
