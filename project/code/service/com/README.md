@@ -94,22 +94,23 @@ navigator status\n
 
 ## 当前内置命令族（见 `parser.c`）
 
-- 参数命令: `set/get/show/export/save/load`
-  - 运行时改查：`set` / `get` / `show [prefix]`（内存注册表）
-  - 备份可读文本：`export`（打印 key=value，不写 Flash）
-  - 持久化：`save` / `load` → LittleFS 文件 `/param.txt`（DATA Flash，经 `fs_service`）
-  - 启动顺序：`fs_init` → `param_init` → 各模块 `param_add` → `param_load`
-- 帮助命令: `help`
-- 运动相关: `chassis`, `motor`
-- 状态估计: `set_position`, `estimator`
-  `estimator mode <inertial|external|fusion|0|1|2>` 用于切换/查询模式；
-  `estimator init_pos <x> <y> <yaw_deg>` 用于校准惯性初始位置偏移
-  `estimator reset` 在 fusion 模式下硬重置 EKF，并吸附到最新视觉坐标
-- OpenART: `openart init_pos <status|update|refresh|send>`
-  OpenART 返回 `{init_pos_evt} state=ready ctx=x_mm=...;y_mm=...;yaw_deg=...` 时，MCU 会自动调用 estimator 初始位姿校准
-- 导航: `navigator`
-- 任务模块: `sokoban`
-- 计时器: `timer`
+**调试速查（语法 / 示例 / 参数表）：`docs/serial_commands.md`**
+
+| 命令 | 作用 |
+|------|------|
+| `help` | 列出已注册命令 |
+| `set` / `get` / `show` / `export` / `save` / `load` | 参数系统（RAM + LFS `/param.txt`） |
+| `motor` | 电机：mask + stop/set/mode/status/param |
+| `chassis` | 底盘：mode/set/heading/stop/status/param |
+
+参数要点：
+
+- 运行时改查：`set` / `get` / `show [prefix]`（内存注册表）
+- 备份可读文本：`export`（打印 key=value，不写 Flash）
+- 持久化：`save` / `load` → LittleFS `/param.txt`（DATA Flash，经 `fs_service`）
+- 启动顺序：`fs_init` → `param_init` → 各模块 `param_add` → `param_load`
+
+> 旧工程中的 `navigator` / `estimator` / `openart` / `sokoban` / `timer` 等 **本固件未注册**。
 
 ## 扩展新命令
 
@@ -128,5 +129,6 @@ navigator status\n
 
 ## 相关文档
 
+- [串口调试命令手册](../../../../docs/serial_commands.md)（语法、示例、参数表）
 - [硬件已启用资源](../../../../docs/hardware.md)
 - [事件系统](../../common/event/README.md)
