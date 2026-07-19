@@ -112,7 +112,8 @@
 - 源码：`motor.*` / `encoder.*` / `chassis.*`
 - 命令 mask：`bit0=左`，`bit1=右`
 - 上电默认 `CHASSIS_MODE_IDLE`；串口：`chassis status` / `chassis openloop ...`
-- 方向反了只改 `polarity`，勿乱换左右脚
+- 方向反了：编码器改 `polarity`，电机机械反向改 `dir_reverse`；勿乱换左右脚
+- 上电时序：`motor_init` 在 `fs_init` 之后；此前 B10/B12 未驱动（悬空电平不定）。`pwm_init(duty=0)` 后 PWM 强制低；DIR 初值 `GPIO_HIGH`，至首次 `motor_set_duty`/`motor_update` 才按 duty 更新
 
 ### 4.2 通信（仅 UART0）
 
@@ -163,6 +164,7 @@ PIT 仅提供 1 ms；业务 soft_timer：
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-19 | 对照代码复核：补方向/上电时序说明；修正 main.c 过时电机脚注释（曾误写 B10=DIR） |
 | 2026-07-19 | 文档职责收敛：本文仅保留**已启用**资源；丝印/慎用脚全文迁出 |
 | 2026-07-19 | 左电机 M4（B10 TIM_G0 + B11）；右 M2（B12/B13）；底盘/编码器启用；无线关 |
 | 2026-07-19 | GUI IPS200 + 按键 A30/A31/B0/B1；命令/日志仅 UART0 |

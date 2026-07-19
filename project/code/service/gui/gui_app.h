@@ -3,7 +3,7 @@
  * @brief MujicaUI 应用入口：菜单树 + 按键 + 周期刷新
  *
  * 依赖：event / soft_timer 已 init；SPI0 屏脚空闲（WiFi SPI 暂关）。
- * 按键：主板 A30/A31/B0/B1（见 docs/hardware.md §6.3）
+ * 按键：主板 A30/A31/B0/B1（见 docs/hardware.md §1 / §4.3）
  */
 #ifndef __GUI_APP_H__
 #define __GUI_APP_H__

@@ -30,7 +30,8 @@
 
 /*
  * 硬件资源划分 —— 权威文档：docs/hardware.md（改脚前必读并回写）
- *   - 电机 PWM: TIM_A0 (B8/B12) + DIR GPIO (B10/B13) —— 主板有刷电机座
+ *   - 左电机 M4: PWM B10(TIM_G0 CH0) + DIR B11
+ *   - 右电机 M2: PWM B12(TIM_A0 CH2) + DIR B13
  *   - 编码器: TIM_G8 / TIM_G9 正交（A26/A27、B7/B9）
  *   - 1ms 节拍: PIT_TIM_G12
  *   - 调试串口 + 命令/日志: UART0 (A10/A11) —— 当前主通道
