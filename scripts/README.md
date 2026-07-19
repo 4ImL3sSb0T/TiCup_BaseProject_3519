@@ -1,8 +1,8 @@
 # Scripts / Host UI
 
-Python 工具与可视化串口上位机，通过固件命令系统控制小车。
+Python 工具与可视化串口上位机，通过固件**命令系统**控制小车。
 
-协议与命令语法见仓库 `docs/serial_commands.md`。
+完整命令语法：仓库根目录 [`docs/serial_commands.md`](../docs/serial_commands.md)。
 
 ## 环境
 
@@ -11,41 +11,89 @@ cd scripts
 uv sync
 ```
 
-Python ≥ 3.12，依赖由 `pyproject.toml` 管理（`pyserial` / `customtkinter` / `matplotlib`）。
+- Python ≥ 3.12（`uv` 管理虚拟环境）
+- 依赖：`pyserial` / `customtkinter` / `matplotlib`
 
-## 上位机
+## 启动上位机
 
 ```powershell
 cd scripts
 uv run python -m host
-# 指定串口
 uv run python -m host --port COM8
-# 协议解析自检（无硬件）
-uv run python -m host --self-check
+uv run python -m host --self-check   # 无硬件，协议解析自检
 ```
 
-功能摘要：
+上次使用的 COM 口保存在 `host/host_config.json`（已 gitignore）。
 
-- 串口连接（默认 115200）、`@seq` 序号帧与 `{cmd_ack}` 显示
-- 底盘：模式 / v·ω 滑条 / 航向 / 急停 / WASD（空格急停）
-- 电机：mask 左右 / mode / set / stop / status / param
-- 参数：get/set/show/export/save/load + apply PID
-- 遥测卡片与速度曲线；可选状态轮询
-- 底部自由命令控制台
+---
 
-急停会发送 `chassis stop` 与 `motor 0x3 stop`。断开或关闭窗口时同样尽力停车。
+## 怎么用（联调）
 
-上次使用的 COM 口保存在 `host/host_config.json`。
+### 连接参数
+
+| 项 | 值 |
+|----|-----|
+| 外设 | 板子 Debug **UART0** |
+| 波特率 | **115200** 8N1 |
+| 行协议 | 命令以 `\n` 结束（工具自动加） |
+| 可选序号 | `@<seq> <cmd>`，ACK：`{cmd_ack} seq=... result=...` |
+
+### 推荐顺序
+
+1. **通路**  
+   连接 → 自动 `help` → 控制台有命令列表与 ACK → 顶栏「轮询状态」打开时遥测更新。
+
+2. **单电机**（「电机」Tab，建议架空轮）  
+   - 急停，保证底盘不抢电机  
+   - 勾选左/右 → `openloop` → 小 duty（800～1500）→ set → stop  
+   - 再 `speed` → set 5～8 → stop  
+
+3. **底盘**（「驾驶」Tab）  
+   - `openloop` 或 `speed` → 滑条调小 **v** 后**松开**（自动下发）  
+   - 或用预设：停 / 慢 / 中 / 左转 / 右转  
+   - **WASD** 遥控；**空格** 急停  
+
+4. **改参**（「参数」Tab）  
+   - `set` 只改 RAM  
+   - 电机：`set motor_kp …` → **应用 motor param**  
+   - 底盘：`set chassis_* …` → **应用 chassis param**  
+   - 持久化：`save`；重载：`load`  
+
+### chassis vs motor
+
+| 场景 | 用哪个 |
+|------|--------|
+| 调单轮、扫 PID | **电机** Tab |
+| 整车差速行驶 | **驾驶** Tab |
+
+两者会控制同一套电机：进电机操作时若底盘非 idle，上位机会先 `chassis stop`；跑车时不要再 motor set。
+
+### 安全
+
+- 顶栏 **急停 STOP** / 键盘 **空格**：`chassis stop` + `motor 0x3 stop`
+- 断开或关窗：尽力停车
+- 开环勿长期堵转；速度从小到大
+- 输入框聚焦时禁用 WASD
+
+### 快捷键（非输入状态）
+
+| 键 | 作用 |
+|----|------|
+| W / S | 前进 / 后退 |
+| A / D | 左转 / 右转 |
+| 空格 | 急停 |
+
+应用内「帮助」Tab 与上文一致。
+
+---
 
 ## 其它脚本
 
 | 路径 | 说明 |
 |------|------|
-| `analyze_map.py` | map 文件分析 |
-| `tools/motor_*.py` | 电机扫参 / 阶跃等串口脚本 |
-| `tools/test_right_motor_*.py` | 右电机冒烟测试 |
-
-示例：
+| `analyze_map.py` | map 分析 |
+| `tools/motor_*.py` | 扫参 / 阶跃 |
+| `tools/test_right_motor_*.py` | 右电机冒烟 |
 
 ```powershell
 uv run python tools/test_right_motor_serial.py COM8

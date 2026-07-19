@@ -1,4 +1,4 @@
-"""Main CustomTkinter host application."""
+"""Main CustomTkinter host application (v0.2 tabbed UI)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from host import commands as cmd
 from host.config_store import load_config, save_config
 from host.protocol import Ack, ChassisStatus, MotorStatus, strip_log_tag
 from host.serial_client import DEFAULT_BAUD, SerialClient, list_serial_ports
+from host.ui.help_text import COMMON_PARAMS, HELP_TEXT
 from host.ui.widgets import LabeledEntry, MetricCard, StatusDot
 
 ctk.set_appearance_mode("dark")
@@ -28,8 +29,8 @@ class HostApp(ctk.CTk):
     def __init__(self, default_port: str = "", baud: int = DEFAULT_BAUD) -> None:
         super().__init__()
         self.title("BaseProject_3519 Host")
-        self.geometry("1280x820")
-        self.minsize(1024, 700)
+        self.geometry("1200x760")
+        self.minsize(960, 640)
 
         self.cfg = load_config()
         if default_port:
@@ -42,21 +43,33 @@ class HostApp(ctk.CTk):
         self._wasd_v = 0.0
         self._wasd_w = 0.0
         self._last_wasd_send = 0.0
+        self._last_live_send = 0.0
         self._poll_job: Optional[str] = None
         self._ui_job: Optional[str] = None
+        self._jog_job: Optional[str] = None
+        self._typing = False
+        self._control_owner = "idle"  # idle | chassis | motor
+        self._chassis_mode = "idle"
+        self._vw_dirty = False  # slider changed but not sent
+        self._vw_sent_v = 0.0
+        self._vw_sent_w = 0.0
 
-        # Telemetry history for plot
         self._t0 = time.time()
         self._plot_t: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
+        self._plot_v: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
         self._plot_wl: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
         self._plot_wr: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
-        self._plot_v: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
+        self._plot_l_spd: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
+        self._plot_r_spd: Deque[float] = deque(maxlen=PLOT_MAX_POINTS)
         self._left_spd = 0.0
         self._right_spd = 0.0
         self._left_tgt = 0.0
         self._right_tgt = 0.0
+        self._left_mode = "—"
+        self._right_mode = "—"
 
         self._build_ui()
+        self._bind_entry_focus()
         self._refresh_ports()
         if self.cfg.get("port"):
             ports = list(self.port_menu.cget("values") or [])
@@ -69,18 +82,29 @@ class HostApp(ctk.CTk):
 
         self._ui_job = self.after(50, self._poll_queues)
         self._schedule_status_poll()
+        self._update_owner_label()
+        self._update_vw_status()
 
-    # ------------------------------------------------------------------ UI
+    # ================================================================== UI
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=1)
-        self.grid_rowconfigure(3, weight=2)
 
         self._build_connection_bar()
-        self._build_mid_row()
-        self._build_lower_row()
-        self._build_console()
+
+        self.tabs = ctk.CTkTabview(self)
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.tab_drive = self.tabs.add("驾驶")
+        self.tab_motor = self.tabs.add("电机")
+        self.tab_param = self.tabs.add("参数")
+        self.tab_console = self.tabs.add("控制台")
+        self.tab_help = self.tabs.add("帮助")
+
+        self._build_drive_tab()
+        self._build_motor_tab()
+        self._build_param_tab()
+        self._build_console_tab()
+        self._build_help_tab()
 
     def _build_connection_bar(self) -> None:
         bar = ctk.CTkFrame(self)
@@ -89,55 +113,55 @@ class HostApp(ctk.CTk):
 
         ctk.CTkLabel(bar, text="串口").grid(row=0, column=0, padx=(10, 4), pady=8)
         self.port_var = ctk.StringVar(value="")
-        self.port_menu = ctk.CTkOptionMenu(bar, variable=self.port_var, values=["—"], width=120)
+        self.port_menu = ctk.CTkOptionMenu(bar, variable=self.port_var, values=["—"], width=110)
         self.port_menu.grid(row=0, column=1, padx=4, pady=8)
-
-        ctk.CTkButton(bar, text="刷新", width=60, command=self._refresh_ports).grid(
+        ctk.CTkButton(bar, text="刷新", width=56, command=self._refresh_ports).grid(
             row=0, column=2, padx=4, pady=8
         )
 
-        ctk.CTkLabel(bar, text="波特率").grid(row=0, column=3, padx=(12, 4), pady=8)
+        ctk.CTkLabel(bar, text="波特率").grid(row=0, column=3, padx=(10, 4), pady=8)
         self.baud_var = ctk.StringVar(value=str(self.cfg.get("baud", DEFAULT_BAUD)))
-        ctk.CTkEntry(bar, textvariable=self.baud_var, width=80).grid(
-            row=0, column=4, padx=4, pady=8
-        )
+        ctk.CTkEntry(bar, textvariable=self.baud_var, width=72).grid(row=0, column=4, padx=4, pady=8)
 
-        self.connect_btn = ctk.CTkButton(bar, text="连接", width=80, command=self._toggle_connect)
-        self.connect_btn.grid(row=0, column=5, padx=8, pady=8)
+        self.connect_btn = ctk.CTkButton(bar, text="连接", width=72, command=self._toggle_connect)
+        self.connect_btn.grid(row=0, column=5, padx=6, pady=8)
 
         self.status_dot = StatusDot(bar)
-        self.status_dot.grid(row=0, column=6, padx=4, pady=8)
-        self.status_lbl = ctk.CTkLabel(bar, text="未连接")
-        self.status_lbl.grid(row=0, column=7, padx=4, pady=8, sticky="w")
+        self.status_dot.grid(row=0, column=6, padx=2, pady=8)
+        self.status_lbl = ctk.CTkLabel(bar, text="未连接", width=160, anchor="w")
+        self.status_lbl.grid(row=0, column=7, padx=2, pady=8, sticky="w")
+
+        self.owner_lbl = ctk.CTkLabel(bar, text="主控: idle", text_color="#f0ad4e")
+        self.owner_lbl.grid(row=0, column=8, padx=8, pady=8, sticky="e")
+
+        self.poll_var = ctk.BooleanVar(value=bool(self.cfg.get("poll_enabled", True)))
+        ctk.CTkCheckBox(
+            bar, text="轮询", variable=self.poll_var, command=self._on_poll_toggle, width=70
+        ).grid(row=0, column=9, padx=4, pady=8)
 
         self.estop_btn = ctk.CTkButton(
             bar,
             text="急停 STOP",
-            width=120,
-            height=36,
+            width=110,
+            height=34,
             fg_color="#c0392b",
             hover_color="#e74c3c",
             font=ctk.CTkFont(size=14, weight="bold"),
             command=self._emergency_stop,
         )
-        self.estop_btn.grid(row=0, column=9, padx=10, pady=8)
+        self.estop_btn.grid(row=0, column=10, padx=10, pady=8)
 
-        self.poll_var = ctk.BooleanVar(value=bool(self.cfg.get("poll_enabled", True)))
-        ctk.CTkCheckBox(bar, text="轮询状态", variable=self.poll_var, command=self._on_poll_toggle).grid(
-            row=0, column=8, padx=8, pady=8, sticky="e"
-        )
+    # -------------------------------------------------------------- 驾驶
+    def _build_drive_tab(self) -> None:
+        tab = self.tab_drive
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=2)
+        tab.grid_rowconfigure(0, weight=1)
 
-    def _build_mid_row(self) -> None:
-        mid = ctk.CTkFrame(self, fg_color="transparent")
-        mid.grid(row=1, column=0, sticky="nsew", padx=10, pady=4)
-        mid.grid_columnconfigure(0, weight=1)
-        mid.grid_columnconfigure(1, weight=2)
-        mid.grid_rowconfigure(0, weight=1)
+        left = ctk.CTkFrame(tab)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=4)
 
-        # ---- Chassis control ----
-        left = ctk.CTkFrame(mid)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        ctk.CTkLabel(left, text="底盘控制", font=ctk.CTkFont(size=15, weight="bold")).pack(
+        ctk.CTkLabel(left, text="底盘", font=ctk.CTkFont(size=15, weight="bold")).pack(
             anchor="w", padx=10, pady=(10, 4)
         )
 
@@ -148,62 +172,101 @@ class HostApp(ctk.CTk):
         ctk.CTkOptionMenu(
             mode_row, variable=self.chassis_mode_var, values=list(CHASSIS_MODES), width=120
         ).pack(side="left", padx=4)
-        ctk.CTkButton(mode_row, text="应用模式", width=90, command=self._apply_chassis_mode).pack(
+        ctk.CTkButton(mode_row, text="应用", width=70, command=self._apply_chassis_mode).pack(
             side="left", padx=4
         )
 
-        # sliders
-        self.v_slider = ctk.CTkSlider(left, from_=-18, to=18, number_of_steps=360, command=self._on_vw_slide)
+        self.v_slider = ctk.CTkSlider(
+            left, from_=-18, to=18, number_of_steps=360, command=self._on_vw_slide
+        )
         self.v_slider.set(0)
-        self.v_slider.pack(fill="x", padx=12, pady=(8, 2))
+        self.v_slider.pack(fill="x", padx=12, pady=(10, 2))
         self.v_lbl = ctk.CTkLabel(left, text="v = 0.00")
         self.v_lbl.pack(anchor="w", padx=12)
+        self.v_slider.bind("<ButtonRelease-1>", self._on_slider_release)
 
-        self.w_slider = ctk.CTkSlider(left, from_=-12, to=12, number_of_steps=240, command=self._on_vw_slide)
+        self.w_slider = ctk.CTkSlider(
+            left, from_=-12, to=12, number_of_steps=240, command=self._on_vw_slide
+        )
         self.w_slider.set(0)
         self.w_slider.pack(fill="x", padx=12, pady=(8, 2))
         self.w_lbl = ctk.CTkLabel(left, text="ω = 0.00")
         self.w_lbl.pack(anchor="w", padx=12)
+        self.w_slider.bind("<ButtonRelease-1>", self._on_slider_release)
+
+        self.vw_status_lbl = ctk.CTkLabel(left, text="已下发 v=0 ω=0", text_color="gray")
+        self.vw_status_lbl.pack(anchor="w", padx=12, pady=(2, 4))
+
+        self.live_send_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            left, text="拖动时连续发送 (~10Hz)", variable=self.live_send_var
+        ).pack(anchor="w", padx=12, pady=2)
 
         btn_row = ctk.CTkFrame(left, fg_color="transparent")
-        btn_row.pack(fill="x", padx=8, pady=8)
-        ctk.CTkButton(btn_row, text="发送 set", command=self._send_chassis_set).pack(side="left", padx=4)
-        ctk.CTkButton(btn_row, text="v/ω 清零", command=self._zero_vw).pack(side="left", padx=4)
-        ctk.CTkButton(btn_row, text="status", command=lambda: self._send(cmd.chassis_status())).pack(
-            side="left", padx=4
+        btn_row.pack(fill="x", padx=8, pady=6)
+        ctk.CTkButton(btn_row, text="发送 set", width=80, command=self._send_chassis_set).pack(
+            side="left", padx=3
         )
+        ctk.CTkButton(btn_row, text="清零", width=60, command=self._zero_vw).pack(side="left", padx=3)
         ctk.CTkButton(
-            btn_row, text="底盘停", fg_color="#922b21", hover_color="#c0392b", command=self._chassis_stop
-        ).pack(side="left", padx=4)
+            btn_row, text="status", width=70, command=lambda: self._send(cmd.chassis_status())
+        ).pack(side="left", padx=3)
+        ctk.CTkButton(
+            btn_row,
+            text="底盘停",
+            width=70,
+            fg_color="#922b21",
+            hover_color="#c0392b",
+            command=self._chassis_stop,
+        ).pack(side="left", padx=3)
+
+        # presets
+        pre = ctk.CTkFrame(left, fg_color="transparent")
+        pre.pack(fill="x", padx=8, pady=4)
+        ctk.CTkLabel(pre, text="预设").pack(side="left", padx=4)
+        for label, v, w in (
+            ("停", 0.0, 0.0),
+            ("慢", 4.0, 0.0),
+            ("中", 8.0, 0.0),
+            ("左转", 0.0, 3.0),
+            ("右转", 0.0, -3.0),
+        ):
+            ctk.CTkButton(
+                pre,
+                text=label,
+                width=52,
+                command=lambda vv=v, ww=w: self._preset_vw(vv, ww),
+            ).pack(side="left", padx=2)
 
         hdg_row = ctk.CTkFrame(left, fg_color="transparent")
-        hdg_row.pack(fill="x", padx=8, pady=4)
+        hdg_row.pack(fill="x", padx=8, pady=6)
         self.hdg_entry = LabeledEntry(hdg_row, "航向°", width=70, default="0")
         self.hdg_entry.pack(side="left", padx=4)
-        ctk.CTkButton(hdg_row, text="设航向", width=70, command=self._set_heading).pack(side="left", padx=4)
+        ctk.CTkButton(hdg_row, text="设航向", width=70, command=self._set_heading).pack(
+            side="left", padx=4
+        )
 
         ctk.CTkLabel(
             left,
-            text="键盘: W/S 前进后退  A/D 转向  空格急停\n（输入框聚焦时禁用键盘控车）",
+            text="WASD 遥控 · 空格急停\n（输入框聚焦时禁用键盘）",
             justify="left",
             text_color="gray",
         ).pack(anchor="w", padx=12, pady=(4, 10))
 
-        # ---- Telemetry + plot ----
-        right = ctk.CTkFrame(mid)
-        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        # right: telemetry + plot
+        right = ctk.CTkFrame(tab)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=4)
         right.grid_columnconfigure(0, weight=1)
-        right.grid_rowconfigure(1, weight=1)
+        right.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(right, text="遥测", font=ctk.CTkFont(size=15, weight="bold")).grid(
-            row=0, column=0, sticky="w", padx=10, pady=(10, 4)
+            row=0, column=0, sticky="w", padx=10, pady=(10, 2)
         )
 
         cards = ctk.CTkFrame(right, fg_color="transparent")
-        cards.grid(row=0, column=0, sticky="ew", padx=6, pady=(36, 4))
+        cards.grid(row=1, column=0, sticky="ew", padx=6, pady=4)
         for i in range(5):
             cards.grid_columnconfigure(i, weight=1)
-
         self.card_mode = MetricCard(cards, "模式")
         self.card_vw = MetricCard(cards, "v / ω")
         self.card_yaw = MetricCard(cards, "yaw / gz")
@@ -215,125 +278,199 @@ class HostApp(ctk.CTk):
         self.card_wheel.grid(row=0, column=3, sticky="ew", padx=3)
         self.card_imu.grid(row=0, column=4, sticky="ew", padx=3)
 
-        plot_frame = ctk.CTkFrame(right)
-        plot_frame.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
-        self._fig = Figure(figsize=(5, 2.4), dpi=100, facecolor="#1a1a1a")
+        plot_wrap = ctk.CTkFrame(right)
+        plot_wrap.grid(row=2, column=0, sticky="nsew", padx=8, pady=8)
+        plot_wrap.grid_columnconfigure(0, weight=1)
+        plot_wrap.grid_rowconfigure(1, weight=1)
+
+        ch_row = ctk.CTkFrame(plot_wrap, fg_color="transparent")
+        ch_row.grid(row=0, column=0, sticky="ew", padx=4, pady=2)
+        self.plot_v_var = ctk.BooleanVar(value=True)
+        self.plot_wl_var = ctk.BooleanVar(value=True)
+        self.plot_wr_var = ctk.BooleanVar(value=True)
+        self.plot_l_var = ctk.BooleanVar(value=False)
+        self.plot_r_var = ctk.BooleanVar(value=False)
+        for text, var in (
+            ("v", self.plot_v_var),
+            ("wl", self.plot_wl_var),
+            ("wr", self.plot_wr_var),
+            ("L spd", self.plot_l_var),
+            ("R spd", self.plot_r_var),
+        ):
+            ctk.CTkCheckBox(ch_row, text=text, variable=var, width=70, command=self._redraw_plot).pack(
+                side="left", padx=4
+            )
+
+        self._fig = Figure(figsize=(5, 2.6), dpi=100, facecolor="#1a1a1a")
         self._ax = self._fig.add_subplot(111)
         self._ax.set_facecolor("#1a1a1a")
         self._ax.tick_params(colors="#bbbbbb", labelsize=8)
         for spine in self._ax.spines.values():
             spine.set_color("#555555")
-        self._ax.set_ylabel("speed", color="#bbbbbb", fontsize=8)
+        self._ax.set_ylabel("value", color="#bbbbbb", fontsize=8)
         self._ax.set_xlabel("t (s)", color="#bbbbbb", fontsize=8)
-        (self._line_v,) = self._ax.plot([], [], label="v tgt", color="#3498db", lw=1.5)
+        (self._line_v,) = self._ax.plot([], [], label="v", color="#3498db", lw=1.4)
         (self._line_wl,) = self._ax.plot([], [], label="wl", color="#2ecc71", lw=1.2)
         (self._line_wr,) = self._ax.plot([], [], label="wr", color="#e67e22", lw=1.2)
+        (self._line_ls,) = self._ax.plot([], [], label="L", color="#9b59b6", lw=1.0, ls="--")
+        (self._line_rs,) = self._ax.plot([], [], label="R", color="#e74c3c", lw=1.0, ls="--")
         self._ax.legend(loc="upper right", fontsize=7, facecolor="#2b2b2b", labelcolor="#dddddd")
         self._fig.tight_layout()
-        self._canvas = FigureCanvasTkAgg(self._fig, master=plot_frame)
-        self._canvas.get_tk_widget().pack(fill="both", expand=True)
+        self._canvas = FigureCanvasTkAgg(self._fig, master=plot_wrap)
+        self._canvas.get_tk_widget().grid(row=1, column=0, sticky="nsew")
 
-    def _build_lower_row(self) -> None:
-        lower = ctk.CTkFrame(self, fg_color="transparent")
-        lower.grid(row=2, column=0, sticky="nsew", padx=10, pady=4)
-        lower.grid_columnconfigure(0, weight=1)
-        lower.grid_columnconfigure(1, weight=1)
-        lower.grid_rowconfigure(0, weight=1)
+    # -------------------------------------------------------------- 电机
+    def _build_motor_tab(self) -> None:
+        tab = self.tab_motor
+        tab.grid_columnconfigure(0, weight=1)
 
-        # Motor
-        motor = ctk.CTkFrame(lower)
-        motor.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        ctk.CTkLabel(motor, text="电机", font=ctk.CTkFont(size=15, weight="bold")).pack(
-            anchor="w", padx=10, pady=(10, 4)
-        )
+        ctk.CTkLabel(
+            tab,
+            text="电机单测（会与底盘抢控制权；操作前自动 chassis stop）",
+            text_color="#f0ad4e",
+        ).pack(anchor="w", padx=12, pady=(12, 4))
 
-        mask_row = ctk.CTkFrame(motor, fg_color="transparent")
-        mask_row.pack(fill="x", padx=8, pady=4)
+        mask_row = ctk.CTkFrame(tab, fg_color="transparent")
+        mask_row.pack(fill="x", padx=12, pady=6)
         self.mask_l = ctk.BooleanVar(value=True)
         self.mask_r = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(mask_row, text="左 L (0x1)", variable=self.mask_l).pack(side="left", padx=6)
-        ctk.CTkCheckBox(mask_row, text="右 R (0x2)", variable=self.mask_r).pack(side="left", padx=6)
+        ctk.CTkCheckBox(mask_row, text="左 L (0x1)", variable=self.mask_l).pack(side="left", padx=8)
+        ctk.CTkCheckBox(mask_row, text="右 R (0x2)", variable=self.mask_r).pack(side="left", padx=8)
 
-        mode_row = ctk.CTkFrame(motor, fg_color="transparent")
-        mode_row.pack(fill="x", padx=8, pady=4)
+        mode_row = ctk.CTkFrame(tab, fg_color="transparent")
+        mode_row.pack(fill="x", padx=12, pady=4)
         ctk.CTkLabel(mode_row, text="模式").pack(side="left", padx=4)
         self.motor_mode_var = ctk.StringVar(value="speed")
-        ctk.CTkOptionMenu(mode_row, variable=self.motor_mode_var, values=list(MOTOR_MODES), width=110).pack(
-            side="left", padx=4
-        )
-        ctk.CTkButton(mode_row, text="应用", width=70, command=self._apply_motor_mode).pack(
+        ctk.CTkOptionMenu(
+            mode_row, variable=self.motor_mode_var, values=list(MOTOR_MODES), width=120
+        ).pack(side="left", padx=4)
+        ctk.CTkButton(mode_row, text="应用模式", width=90, command=self._apply_motor_mode).pack(
             side="left", padx=4
         )
 
-        set_row = ctk.CTkFrame(motor, fg_color="transparent")
-        set_row.pack(fill="x", padx=8, pady=4)
-        self.motor_val = LabeledEntry(set_row, "目标", width=90, default="5")
+        set_row = ctk.CTkFrame(tab, fg_color="transparent")
+        set_row.pack(fill="x", padx=12, pady=4)
+        self.motor_val = LabeledEntry(set_row, "目标", width=100, default="5")
         self.motor_val.pack(side="left", padx=4)
-        ctk.CTkButton(set_row, text="set", width=60, command=self._motor_set).pack(side="left", padx=4)
-        ctk.CTkButton(set_row, text="stop", width=60, command=self._motor_stop).pack(side="left", padx=4)
-        ctk.CTkButton(set_row, text="status", width=70, command=self._motor_status).pack(side="left", padx=4)
-        ctk.CTkButton(set_row, text="param", width=70, command=self._motor_param).pack(side="left", padx=4)
+        ctk.CTkButton(set_row, text="set", width=64, command=self._motor_set).pack(side="left", padx=3)
+        ctk.CTkButton(set_row, text="stop", width=64, command=self._motor_stop).pack(side="left", padx=3)
+        ctk.CTkButton(set_row, text="status", width=70, command=self._motor_status).pack(
+            side="left", padx=3
+        )
+        ctk.CTkButton(set_row, text="param", width=70, command=self._motor_param).pack(
+            side="left", padx=3
+        )
+
+        jog_row = ctk.CTkFrame(tab, fg_color="transparent")
+        jog_row.pack(fill="x", padx=12, pady=8)
+        ctk.CTkLabel(jog_row, text="开环点动").pack(side="left", padx=4)
+        self.jog_duty = LabeledEntry(jog_row, "duty", width=80, default="1200")
+        self.jog_duty.pack(side="left", padx=4)
+        self.jog_sec = LabeledEntry(jog_row, "秒", width=50, default="1.5")
+        self.jog_sec.pack(side="left", padx=4)
+        ctk.CTkButton(jog_row, text="执行点动", width=90, command=self._motor_jog).pack(
+            side="left", padx=6
+        )
+        ctk.CTkButton(
+            jog_row,
+            text="取消点动",
+            width=90,
+            fg_color="#7f8c8d",
+            command=self._cancel_jog,
+        ).pack(side="left", padx=3)
 
         self.motor_info = ctk.CTkLabel(
-            motor,
+            tab,
             text="L: —\nR: —",
             justify="left",
-            font=ctk.CTkFont(family="Consolas", size=12),
+            font=ctk.CTkFont(family="Consolas", size=14),
         )
-        self.motor_info.pack(anchor="w", padx=12, pady=(6, 10))
+        self.motor_info.pack(anchor="w", padx=16, pady=16)
 
-        # Param
-        param = ctk.CTkFrame(lower)
-        param.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        ctk.CTkLabel(param, text="参数", font=ctk.CTkFont(size=15, weight="bold")).pack(
+        ctk.CTkLabel(
+            tab,
+            text="speed 目标约 5~12 counts/2ms；openloop duty 建议先 <2000，勿堵转。",
+            text_color="gray",
+        ).pack(anchor="w", padx=12, pady=8)
+
+    # -------------------------------------------------------------- 参数
+    def _build_param_tab(self) -> None:
+        tab = self.tab_param
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=1)
+
+        left = ctk.CTkFrame(tab)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6), pady=4)
+        ctk.CTkLabel(left, text="读写", font=ctk.CTkFont(size=15, weight="bold")).pack(
             anchor="w", padx=10, pady=(10, 4)
         )
 
-        row1 = ctk.CTkFrame(param, fg_color="transparent")
+        row1 = ctk.CTkFrame(left, fg_color="transparent")
         row1.pack(fill="x", padx=8, pady=4)
-        self.param_name = LabeledEntry(row1, "名", width=140, default="motor_kp")
+        self.param_name = LabeledEntry(row1, "名", width=150, default="motor_kp")
         self.param_name.pack(side="left", padx=4)
         self.param_value = LabeledEntry(row1, "值", width=90, default="120")
         self.param_value.pack(side="left", padx=4)
-        ctk.CTkButton(row1, text="get", width=50, command=self._param_get).pack(side="left", padx=2)
-        ctk.CTkButton(row1, text="set", width=50, command=self._param_set).pack(side="left", padx=2)
 
-        row2 = ctk.CTkFrame(param, fg_color="transparent")
+        row2 = ctk.CTkFrame(left, fg_color="transparent")
         row2.pack(fill="x", padx=8, pady=4)
-        self.param_prefix = LabeledEntry(row2, "前缀", width=100, default="motor")
-        self.param_prefix.pack(side="left", padx=4)
-        ctk.CTkButton(row2, text="show", width=60, command=self._param_show).pack(side="left", padx=2)
-        ctk.CTkButton(row2, text="export", width=70, command=lambda: self._send(cmd.param_export())).pack(
-            side="left", padx=2
-        )
-        ctk.CTkButton(row2, text="save", width=60, command=lambda: self._send(cmd.param_save())).pack(
-            side="left", padx=2
-        )
-        ctk.CTkButton(row2, text="load", width=60, command=lambda: self._send(cmd.param_load())).pack(
-            side="left", padx=2
-        )
+        ctk.CTkButton(row2, text="get", width=60, command=self._param_get).pack(side="left", padx=3)
+        ctk.CTkButton(row2, text="set", width=60, command=self._param_set).pack(side="left", padx=3)
+        self.param_prefix = LabeledEntry(row2, "前缀", width=90, default="motor")
+        self.param_prefix.pack(side="left", padx=8)
+        ctk.CTkButton(row2, text="show", width=60, command=self._param_show).pack(side="left", padx=3)
 
-        row3 = ctk.CTkFrame(param, fg_color="transparent")
+        row3 = ctk.CTkFrame(left, fg_color="transparent")
         row3.pack(fill="x", padx=8, pady=8)
-        ctk.CTkButton(row3, text="应用 motor param", command=self._motor_param).pack(side="left", padx=4)
-        ctk.CTkButton(row3, text="应用 chassis param", command=lambda: self._send(cmd.chassis_param())).pack(
-            side="left", padx=4
+        ctk.CTkButton(row3, text="export", width=70, command=lambda: self._send(cmd.param_export())).pack(
+            side="left", padx=3
         )
+        ctk.CTkButton(row3, text="save", width=70, command=lambda: self._send(cmd.param_save())).pack(
+            side="left", padx=3
+        )
+        ctk.CTkButton(row3, text="load", width=70, command=lambda: self._send(cmd.param_load())).pack(
+            side="left", padx=3
+        )
+
+        row4 = ctk.CTkFrame(left, fg_color="transparent")
+        row4.pack(fill="x", padx=8, pady=4)
+        ctk.CTkButton(row4, text="应用 motor param", command=self._motor_param).pack(side="left", padx=4)
+        ctk.CTkButton(
+            row4, text="应用 chassis param", command=lambda: self._send(cmd.chassis_param())
+        ).pack(side="left", padx=4)
+
         ctk.CTkLabel(
-            param,
-            text="提示: set 只改 RAM；PID 需再点 apply；持久化用 save",
+            left,
+            text="set 只改 RAM；PID 必须再点 apply；掉电保存用 save。",
             text_color="gray",
-        ).pack(anchor="w", padx=12, pady=(0, 10))
+        ).pack(anchor="w", padx=12, pady=(8, 12))
 
-    def _build_console(self) -> None:
-        cons = ctk.CTkFrame(self)
-        cons.grid(row=3, column=0, sticky="nsew", padx=10, pady=(4, 10))
-        cons.grid_columnconfigure(0, weight=1)
-        cons.grid_rowconfigure(1, weight=1)
+        right = ctk.CTkFrame(tab)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0), pady=4)
+        ctk.CTkLabel(right, text="常用参数（点击填入）", font=ctk.CTkFont(size=15, weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 4)
+        )
+        scroll = ctk.CTkScrollableFrame(right, height=360)
+        scroll.pack(fill="both", expand=True, padx=8, pady=8)
+        for name in COMMON_PARAMS:
+            ctk.CTkButton(
+                scroll,
+                text=name,
+                anchor="w",
+                fg_color="transparent",
+                border_width=1,
+                command=lambda n=name: self._pick_param(n),
+            ).pack(fill="x", pady=2)
 
-        head = ctk.CTkFrame(cons, fg_color="transparent")
+    # -------------------------------------------------------------- 控制台
+    def _build_console_tab(self) -> None:
+        tab = self.tab_console
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+
+        head = ctk.CTkFrame(tab, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
-        ctk.CTkLabel(head, text="控制台", font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
+        ctk.CTkLabel(head, text="串口日志", font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
         self.filter_ack = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(head, text="仅 ACK/发送", variable=self.filter_ack).pack(side="left", padx=12)
         ctk.CTkButton(head, text="清空", width=60, command=self._clear_log).pack(side="right", padx=4)
@@ -341,11 +478,11 @@ class HostApp(ctk.CTk):
             side="right", padx=4
         )
 
-        self.log_box = ctk.CTkTextbox(cons, font=ctk.CTkFont(family="Consolas", size=12))
+        self.log_box = ctk.CTkTextbox(tab, font=ctk.CTkFont(family="Consolas", size=12))
         self.log_box.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
         self.log_box.configure(state="disabled")
 
-        send_row = ctk.CTkFrame(cons, fg_color="transparent")
+        send_row = ctk.CTkFrame(tab, fg_color="transparent")
         send_row.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 8))
         send_row.grid_columnconfigure(0, weight=1)
         self.cmd_entry = ctk.CTkEntry(send_row, placeholder_text="自由命令，例如: chassis status")
@@ -359,7 +496,34 @@ class HostApp(ctk.CTk):
             row=0, column=2, padx=4
         )
 
-    # ----------------------------------------------------------- connection
+    def _build_help_tab(self) -> None:
+        box = ctk.CTkTextbox(self.tab_help, font=ctk.CTkFont(family="Microsoft YaHei UI", size=13))
+        box.pack(fill="both", expand=True, padx=8, pady=8)
+        box.insert("1.0", HELP_TEXT)
+        box.configure(state="disabled")
+
+    # ------------------------------------------------------- focus / ports
+    def _bind_entry_focus(self) -> None:
+        def on_in(_e=None) -> None:
+            self._typing = True
+
+        def on_out(_e=None) -> None:
+            self._typing = False
+
+        widgets = [
+            self.cmd_entry,
+            self.hdg_entry.entry,
+            self.motor_val.entry,
+            self.jog_duty.entry,
+            self.jog_sec.entry,
+            self.param_name.entry,
+            self.param_value.entry,
+            self.param_prefix.entry,
+        ]
+        for w in widgets:
+            w.bind("<FocusIn>", on_in)
+            w.bind("<FocusOut>", on_out)
+
     def _refresh_ports(self) -> None:
         ports = list_serial_ports()
         if not ports:
@@ -369,6 +533,7 @@ class HostApp(ctk.CTk):
         if cur not in ports:
             self.port_var.set(ports[0])
 
+    # ----------------------------------------------------------- connection
     def _toggle_connect(self) -> None:
         if self.client.is_open:
             self._disconnect()
@@ -389,7 +554,7 @@ class HostApp(ctk.CTk):
             self.client.open(port, baud)
         except Exception as e:
             self.status_dot.set_state(False, error=True)
-            self.status_lbl.configure(text=f"打开失败: {e}")
+            self.status_lbl.configure(text=f"打开失败")
             self._log_ui(f"打开 {port} 失败: {e}", "error")
             return
 
@@ -399,15 +564,15 @@ class HostApp(ctk.CTk):
 
         self.connect_btn.configure(text="断开")
         self.status_dot.set_state(True)
-        self.status_lbl.configure(text=f"已连接 {port} @ {baud}")
+        self.status_lbl.configure(text=f"{port} @ {baud}")
         self._log_ui(f"已连接 {port} @ {baud}", "tx")
-        # probe
         try:
             self._send(cmd.help_cmd())
         except Exception:
             pass
 
     def _disconnect(self, send_stop: bool = True) -> None:
+        self._cancel_jog()
         if send_stop and self.client.is_open:
             try:
                 for c in cmd.emergency_stop_cmds():
@@ -419,26 +584,25 @@ class HostApp(ctk.CTk):
         self.connect_btn.configure(text="连接")
         self.status_dot.set_state(False)
         self.status_lbl.configure(text="未连接")
+        self._control_owner = "idle"
+        self._chassis_mode = "idle"
+        self._update_owner_label()
         self._log_ui("已断开", "tx")
 
     def _on_close(self) -> None:
         self.cfg["poll_enabled"] = bool(self.poll_var.get())
         save_config(self.cfg)
-        if self._poll_job is not None:
-            try:
-                self.after_cancel(self._poll_job)
-            except Exception:
-                pass
-        if self._ui_job is not None:
-            try:
-                self.after_cancel(self._ui_job)
-            except Exception:
-                pass
+        for job in (self._poll_job, self._ui_job, self._jog_job):
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
         self._disconnect(send_stop=True)
         self.destroy()
 
-    # -------------------------------------------------------------- send API
-    def _send(self, command: str, force_seq: Optional[bool] = None) -> None:
+    # --------------------------------------------------------------- send
+    def _send(self, command: str, force_seq: Optional[bool] = None, silent: bool = False) -> None:
         if not self.client.is_open:
             self._log_ui("未连接，无法发送", "error")
             return
@@ -448,23 +612,23 @@ class HostApp(ctk.CTk):
         except Exception as e:
             self._log_ui(f"发送失败: {e}", "error")
             return
-        if seq >= 0:
-            self._log_ui(f">>> @{seq} {command}", "tx")
-        else:
-            self._log_ui(f">>> {command}", "tx")
+        if not silent:
+            if seq >= 0:
+                self._log_ui(f"@{seq} {command}", "tx")
+            else:
+                self._log_ui(command, "tx")
 
     def _send_free_cmd(self) -> None:
         text = self.cmd_entry.get().strip()
         if not text:
             return
-        # allow user to type @n already
         if text.startswith("@"):
             if not self.client.is_open:
                 self._log_ui("未连接，无法发送", "error")
                 return
             try:
                 self.client.send_raw(text, with_seq=False)
-                self._log_ui(f">>> {text}", "tx")
+                self._log_ui(text, "tx")
             except Exception as e:
                 self._log_ui(f"发送失败: {e}", "error")
         else:
@@ -472,50 +636,139 @@ class HostApp(ctk.CTk):
         self.cmd_entry.delete(0, "end")
 
     def _emergency_stop(self) -> None:
+        self._cancel_jog()
         self._keys_down.clear()
         self._wasd_v = 0.0
         self._wasd_w = 0.0
         self.v_slider.set(0)
         self.w_slider.set(0)
         self._on_vw_slide(0)
+        self._vw_dirty = False
+        self._vw_sent_v = 0.0
+        self._vw_sent_w = 0.0
+        self._update_vw_status()
+        self._control_owner = "idle"
+        self._chassis_mode = "idle"
+        self._update_owner_label()
         if not self.client.is_open:
             self._log_ui("急停：未连接", "error")
             return
         for c in cmd.emergency_stop_cmds():
             try:
-                # estop without waiting; no seq for speed
                 self.client.send_raw(c, with_seq=False)
-                self._log_ui(f">>> {c}  [ESTOP]", "tx")
+                self._log_ui(f"{c}  [ESTOP]", "tx")
             except Exception as e:
                 self._log_ui(f"急停发送失败: {e}", "error")
 
-    # ----------------------------------------------------------- chassis UI
+    def _ensure_motor_owner(self) -> bool:
+        """Stop chassis if needed before motor commands. Returns False if aborted."""
+        if not self.client.is_open:
+            self._log_ui("未连接，无法发送", "error")
+            return False
+        if self._chassis_mode not in ("idle", "") and self._control_owner == "chassis":
+            self._log_ui("电机操作：先停止底盘", "tx")
+            try:
+                self.client.send_raw(cmd.chassis_stop(), with_seq=False)
+            except Exception as e:
+                self._log_ui(f"停底盘失败: {e}", "error")
+                return False
+            self._chassis_mode = "idle"
+            self.v_slider.set(0)
+            self.w_slider.set(0)
+            self._on_vw_slide(0)
+        self._control_owner = "motor"
+        self._update_owner_label()
+        return True
+
+    def _set_chassis_owner(self) -> None:
+        self._control_owner = "chassis"
+        self._update_owner_label()
+
+    def _update_owner_label(self) -> None:
+        colors = {"idle": "#95a5a6", "chassis": "#5dade2", "motor": "#f0ad4e"}
+        self.owner_lbl.configure(
+            text=f"主控: {self._control_owner}",
+            text_color=colors.get(self._control_owner, "#95a5a6"),
+        )
+
+    # -------------------------------------------------------------- chassis
     def _on_vw_slide(self, _value=None) -> None:
         v = float(self.v_slider.get())
         w = float(self.w_slider.get())
         self.v_lbl.configure(text=f"v = {v:.2f}")
         self.w_lbl.configure(text=f"ω = {w:.2f}")
+        if abs(v - self._vw_sent_v) > 1e-3 or abs(w - self._vw_sent_w) > 1e-3:
+            self._vw_dirty = True
+            self._update_vw_status()
+        if self.live_send_var.get() and self.client.is_open:
+            now = time.time()
+            if now - self._last_live_send >= 0.1:
+                self._last_live_send = now
+                self._send_chassis_set(silent=True)
+
+    def _on_slider_release(self, _event=None) -> None:
+        if self._vw_dirty:
+            self._send_chassis_set()
+
+    def _update_vw_status(self) -> None:
+        if self._vw_dirty:
+            self.vw_status_lbl.configure(
+                text=f"未下发  当前滑条 v={float(self.v_slider.get()):.2f} ω={float(self.w_slider.get()):.2f}",
+                text_color="#f0ad4e",
+            )
+        else:
+            self.vw_status_lbl.configure(
+                text=f"已下发 v={self._vw_sent_v:.2f} ω={self._vw_sent_w:.2f}",
+                text_color="gray",
+            )
+
+    def _send_chassis_set(self, silent: bool = False) -> None:
+        v = float(self.v_slider.get())
+        w = float(self.w_slider.get())
+        self._set_chassis_owner()
+        self._send(cmd.chassis_set(v, w), force_seq=False if silent else None, silent=silent)
+        self._vw_sent_v = v
+        self._vw_sent_w = w
+        self._vw_dirty = False
+        self._update_vw_status()
 
     def _zero_vw(self) -> None:
         self.v_slider.set(0)
         self.w_slider.set(0)
         self._on_vw_slide(0)
         if self.client.is_open:
-            self._send(cmd.chassis_set(0, 0))
+            self._send_chassis_set()
 
-    def _send_chassis_set(self) -> None:
-        v = float(self.v_slider.get())
-        w = float(self.w_slider.get())
-        self._send(cmd.chassis_set(v, w))
+    def _preset_vw(self, v: float, w: float) -> None:
+        self.v_slider.set(v)
+        self.w_slider.set(w)
+        self._on_vw_slide(0)
+        if abs(v) < 1e-6 and abs(w) < 1e-6:
+            self._chassis_stop()
+        else:
+            self._send_chassis_set()
 
     def _apply_chassis_mode(self) -> None:
-        self._send(cmd.chassis_mode(self.chassis_mode_var.get()))
+        name = self.chassis_mode_var.get()
+        self._set_chassis_owner()
+        self._send(cmd.chassis_mode(name))
+        self._chassis_mode = name
+        if name == "idle":
+            self._control_owner = "idle"
+            self._update_owner_label()
 
     def _chassis_stop(self) -> None:
         self.v_slider.set(0)
         self.w_slider.set(0)
         self._on_vw_slide(0)
+        self._vw_sent_v = 0.0
+        self._vw_sent_w = 0.0
+        self._vw_dirty = False
+        self._update_vw_status()
         self._send(cmd.chassis_stop())
+        self._chassis_mode = "idle"
+        self._control_owner = "idle"
+        self._update_owner_label()
 
     def _set_heading(self) -> None:
         try:
@@ -523,9 +776,10 @@ class HostApp(ctk.CTk):
         except ValueError:
             self._log_ui("航向角度无效", "error")
             return
+        self._set_chassis_owner()
         self._send(cmd.chassis_heading(deg))
 
-    # ------------------------------------------------------------- motor UI
+    # ---------------------------------------------------------------- motor
     def _motor_mask(self) -> int:
         m = 0
         if self.mask_l.get():
@@ -535,6 +789,8 @@ class HostApp(ctk.CTk):
         return m
 
     def _apply_motor_mode(self) -> None:
+        if not self._ensure_motor_owner():
+            return
         mask = self._motor_mask()
         if mask == 0:
             self._log_ui("请至少选择一个电机", "error")
@@ -542,6 +798,8 @@ class HostApp(ctk.CTk):
         self._send(cmd.motor_mode(mask, self.motor_mode_var.get()))
 
     def _motor_set(self) -> None:
+        if not self._ensure_motor_owner():
+            return
         mask = self._motor_mask()
         if mask == 0:
             self._log_ui("请至少选择一个电机", "error")
@@ -554,8 +812,14 @@ class HostApp(ctk.CTk):
         self._send(cmd.motor_set(mask, val))
 
     def _motor_stop(self) -> None:
+        if not self.client.is_open:
+            self._log_ui("未连接，无法发送", "error")
+            return
         mask = self._motor_mask() or 0x3
         self._send(cmd.motor_stop(mask))
+        if self._control_owner == "motor":
+            self._control_owner = "idle"
+            self._update_owner_label()
 
     def _motor_status(self) -> None:
         mask = self._motor_mask() or 0x3
@@ -565,7 +829,52 @@ class HostApp(ctk.CTk):
         mask = self._motor_mask() or 0x3
         self._send(cmd.motor_param(mask))
 
-    # ------------------------------------------------------------- param UI
+    def _motor_jog(self) -> None:
+        if not self._ensure_motor_owner():
+            return
+        mask = self._motor_mask()
+        if mask == 0:
+            self._log_ui("请至少选择一个电机", "error")
+            return
+        try:
+            duty = float(self.jog_duty.get())
+            sec = float(self.jog_sec.get())
+        except ValueError:
+            self._log_ui("点动参数无效", "error")
+            return
+        if sec <= 0 or sec > 10:
+            self._log_ui("点动时间限制 0~10 秒", "error")
+            return
+        self._cancel_jog()
+        self._send(cmd.motor_mode(mask, "openloop"))
+        self._send(cmd.motor_set(mask, duty))
+        self._log_ui(f"点动中 {sec:.1f}s …", "tx")
+        self._jog_job = self.after(int(sec * 1000), lambda: self._jog_finish(mask))
+
+    def _jog_finish(self, mask: int) -> None:
+        self._jog_job = None
+        if self.client.is_open:
+            self._send(cmd.motor_stop(mask))
+        self._log_ui("点动结束", "tx")
+
+    def _cancel_jog(self) -> None:
+        if self._jog_job is not None:
+            try:
+                self.after_cancel(self._jog_job)
+            except Exception:
+                pass
+            self._jog_job = None
+            if self.client.is_open:
+                try:
+                    self.client.send_raw(cmd.motor_stop(self._motor_mask() or 0x3), with_seq=False)
+                    self._log_ui("点动已取消", "tx")
+                except Exception:
+                    pass
+
+    # ---------------------------------------------------------------- param
+    def _pick_param(self, name: str) -> None:
+        self.param_name.set(name)
+
     def _param_get(self) -> None:
         name = self.param_name.get()
         if not name:
@@ -583,18 +892,9 @@ class HostApp(ctk.CTk):
     def _param_show(self) -> None:
         self._send(cmd.param_show(self.param_prefix.get()))
 
-    # ---------------------------------------------------------------- WASD
-    def _focus_is_entry(self) -> bool:
-        w = self.focus_get()
-        if w is None:
-            return False
-        cls = w.winfo_class()
-        # CTk Entry / Text use various class names
-        name = str(type(w))
-        return "Entry" in cls or "Text" in cls or "Entry" in name or "Text" in name
-
+    # ----------------------------------------------------------------- WASD
     def _on_key_press(self, event) -> None:
-        if self._focus_is_entry():
+        if self._typing:
             return
         key = (event.keysym or "").lower()
         if key == "space":
@@ -605,7 +905,7 @@ class HostApp(ctk.CTk):
             self._update_wasd()
 
     def _on_key_release(self, event) -> None:
-        if self._focus_is_entry():
+        if self._typing:
             return
         key = (event.keysym or "").lower()
         if key in self._keys_down:
@@ -615,7 +915,6 @@ class HostApp(ctk.CTk):
     def _update_wasd(self) -> None:
         v = 0.0
         w = 0.0
-        # moderate keyboard defaults
         if "w" in self._keys_down:
             v += 6.0
         if "s" in self._keys_down:
@@ -635,12 +934,16 @@ class HostApp(ctk.CTk):
         self._last_wasd_send = now
         if self.client.is_open:
             try:
-                # no seq / no log spam for teleop
+                self._set_chassis_owner()
                 self.client.send_raw(cmd.chassis_set(v, w), with_seq=False)
+                self._vw_sent_v = v
+                self._vw_sent_w = w
+                self._vw_dirty = False
+                self._update_vw_status()
             except Exception as e:
                 self._log_ui(f"WASD 发送失败: {e}", "error")
 
-    # ----------------------------------------------------------- poll / log
+    # ---------------------------------------------------------- poll / log
     def _on_poll_toggle(self) -> None:
         self.cfg["poll_enabled"] = bool(self.poll_var.get())
         save_config(self.cfg)
@@ -654,11 +957,21 @@ class HostApp(ctk.CTk):
         if not self.poll_var.get() or not self.client.is_open:
             return
         try:
-            # silent-ish: use seq but don't flood log for poll — log only TX optionally filtered
-            self.client.send_raw(cmd.chassis_status(), with_seq=True)
-            self.client.send_raw(cmd.motor_status(0x3), with_seq=True)
+            # silent, no seq — reduce ACK noise (B1)
+            self.client.send_raw(cmd.chassis_status(), with_seq=False)
+            self.client.send_raw(cmd.motor_status(0x3), with_seq=False)
+        except Exception as e:
+            self._put_disconnect(str(e))
+
+    def _put_disconnect(self, msg: str) -> None:
+        self.status_dot.set_state(False, error=True)
+        self.status_lbl.configure(text="连接异常")
+        self._log_ui(f"串口异常: {msg}", "error")
+        try:
+            self.client.close()
         except Exception:
             pass
+        self.connect_btn.configure(text="连接")
 
     def _clear_log(self) -> None:
         self.log_box.configure(state="normal")
@@ -666,31 +979,25 @@ class HostApp(ctk.CTk):
         self.log_box.configure(state="disabled")
 
     def _log_ui(self, text: str, kind: str = "rx") -> None:
-        if self.filter_ack.get() and kind == "rx":
-            # only show ack lines when filter is on
-            if "{cmd_ack}" not in text and not text.startswith(">>>"):
-                return
-        colors = {
-            "tx": "#5dade2",
-            "ack_ok": "#58d68d",
-            "ack_err": "#f1948a",
-            "error": "#e74c3c",
-            "rx": "#d5d8dc",
+        prefixes = {
+            "tx": "[TX]  ",
+            "ack_ok": "[ACK] ",
+            "ack_err": "[ERR] ",
+            "error": "[ERR] ",
+            "rx": "[RX]  ",
         }
-        color = colors.get(kind, colors["rx"])
+        prefix = prefixes.get(kind, "[RX]  ")
+        line = prefix + text
+        if self.filter_ack.get() and kind == "rx":
+            return
         self.log_box.configure(state="normal")
-        self.log_box.insert("end", text + "\n")
-        # tag last line color approximately by inserting with tags is complex in CTkTextbox;
-        # keep simple mono log — color via prefix
+        self.log_box.insert("end", line + "\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        # silence unused
-        _ = color
 
     def _poll_queues(self) -> None:
-        # lines
         n = 0
-        while n < 80:
+        while n < 100:
             try:
                 line = self.client.line_queue.get_nowait()
             except Exception:
@@ -724,40 +1031,35 @@ class HostApp(ctk.CTk):
                 err = self.client.error_queue.get_nowait()
             except Exception:
                 break
-            self.status_dot.set_state(False, error=True)
-            self.status_lbl.configure(text=err)
-            self._log_ui(err, "error")
+            self._put_disconnect(err)
 
         self._ui_job = self.after(50, self._poll_queues)
 
     def _handle_rx_line(self, line: str) -> None:
-        # skip pure motor plot spam if present
-        if "{motor_l}" in line or line.startswith("{motor_l}"):
+        if "{motor_l}" in line:
             return
-        # status polling is noisy; still parse via queues, just hide from log
+        # hide poll status noise
         if self.poll_var.get() and (
             "chassis:" in line
             or "Left:" in line
             or "Right:" in line
-            or "status_printed" in line
         ):
+            return
+        if self.filter_ack.get() and "{cmd_ack}" not in line:
             return
         tag, body = strip_log_tag(line)
         display = line if not tag else f"{{{tag}}}{body}"
-        if self.filter_ack.get():
-            if "{cmd_ack}" not in line:
-                return
+        # cmd_ack lines handled also in _handle_ack — skip duplicate RX if pure ack
+        if "{cmd_ack}" in line:
+            return
         self._log_ui(display, "rx")
 
     def _handle_ack(self, ack: Ack) -> None:
-        # hide routine poll ACKs when polling is on
-        if self.poll_var.get() and ack.ok and ack.ctx in ("status_printed", ""):
-            # still show non-status ACKs; empty ctx appears often — only skip status_printed
-            if ack.ctx == "status_printed":
-                return
+        if ack.ok and ack.ctx == "status_printed":
+            return
         kind = "ack_ok" if ack.ok else "ack_err"
         extra = f" ctx={ack.ctx}" if ack.ctx else ""
-        self._log_ui(f"ACK seq={ack.seq} {ack.result}{extra}", kind)
+        self._log_ui(f"seq={ack.seq} {ack.result}{extra}", kind)
         if not ack.ok:
             self.status_lbl.configure(text=f"ACK {ack.result}")
 
@@ -767,24 +1069,29 @@ class HostApp(ctk.CTk):
         self.card_yaw.set_value(f"{ch.yaw:.1f} / {ch.gz:.1f}")
         self.card_wheel.set_value(f"{ch.wl:.2f} / {ch.wr:.2f}")
         self.card_imu.set_value("ready" if ch.imu else "no")
+        self._chassis_mode = ch.mode
         t = time.time() - self._t0
         self._plot_t.append(t)
         self._plot_v.append(ch.v)
         self._plot_wl.append(ch.wl)
         self._plot_wr.append(ch.wr)
+        self._plot_l_spd.append(self._left_spd)
+        self._plot_r_spd.append(self._right_spd)
         self._redraw_plot()
 
     def _handle_motor(self, m: MotorStatus) -> None:
         if m.name == "Left":
             self._left_spd = m.spd
             self._left_tgt = m.tgt_spd
+            self._left_mode = m.mode
         else:
             self._right_spd = m.spd
             self._right_tgt = m.tgt_spd
+            self._right_mode = m.mode
         self.motor_info.configure(
             text=(
-                f"L: spd={self._left_spd:+.2f} tgt={self._left_tgt:+.2f}\n"
-                f"R: spd={self._right_spd:+.2f} tgt={self._right_tgt:+.2f}"
+                f"L: mode={self._left_mode}  spd={self._left_spd:+.2f}  tgt={self._left_tgt:+.2f}\n"
+                f"R: mode={self._right_mode}  spd={self._right_spd:+.2f}  tgt={self._right_tgt:+.2f}"
             )
         )
 
@@ -792,9 +1099,18 @@ class HostApp(ctk.CTk):
         if not self._plot_t:
             return
         xs = list(self._plot_t)
-        self._line_v.set_data(xs, list(self._plot_v))
-        self._line_wl.set_data(xs, list(self._plot_wl))
-        self._line_wr.set_data(xs, list(self._plot_wr))
+
+        def set_line(line, enabled: bool, ys: Deque[float]) -> None:
+            if enabled:
+                line.set_data(xs, list(ys))
+            else:
+                line.set_data([], [])
+
+        set_line(self._line_v, self.plot_v_var.get(), self._plot_v)
+        set_line(self._line_wl, self.plot_wl_var.get(), self._plot_wl)
+        set_line(self._line_wr, self.plot_wr_var.get(), self._plot_wr)
+        set_line(self._line_ls, self.plot_l_var.get(), self._plot_l_spd)
+        set_line(self._line_rs, self.plot_r_var.get(), self._plot_r_spd)
         self._ax.relim()
         self._ax.autoscale_view()
         self._canvas.draw_idle()
