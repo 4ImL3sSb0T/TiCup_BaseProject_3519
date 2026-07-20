@@ -111,6 +111,8 @@ typedef enum
 #define IMU963RA_ACC_SAMPLE_DEFAULT     ( IMU963RA_ACC_SAMPLE_SGN_8G )          // 在这设置默认的 加速度计 初始化量程
 #define IMU963RA_GYRO_SAMPLE_DEFAULT    ( IMU963RA_GYRO_SAMPLE_SGN_2000DPS )    // 在这设置默认的 陀螺仪   初始化量程
 #define IMU963RA_MAG_SAMPLE_DEFAULT     ( IMU963RA_MAG_SAMPLE_8G )              // 在这设置默认的 磁力计   初始化量程
+/* 初始化写入 CTRL1_XL/CTRL2_G 时 ODR 拉满 LSM6DSR 最高档（见 imu963ra_init） */
+#define IMU963RA_ODR_HZ                 ( 6667U )
 #define IMU963RA_TIMEOUT_COUNT                      (0x00FF)                    // IMU963RA 超时计数
 //================================================定义 IMU963RA 基本配置================================================
 

@@ -382,11 +382,15 @@ uint8 imu963ra_init (void)
                             
         imu963ra_write_acc_gyro_register(IMU963RA_INT1_CTRL, 0x03);             // 开启陀螺仪 加速度数据就绪中断
 
-        // IMU963RA_CTRL1_XL 寄存器
-        // 设置为 0x30 加速度量程为 ±2  g    获取到的加速度计数据除以 16393  可以转化为带物理单位的数据 (g 代表重力加速度 物理学名词 一般情况下 g 取 9.8 m/s^2 为标准值)
-        // 设置为 0x38 加速度量程为 ±4  g    获取到的加速度计数据除以 8197   可以转化为带物理单位的数据 (g 代表重力加速度 物理学名词 一般情况下 g 取 9.8 m/s^2 为标准值)
-        // 设置为 0x3C 加速度量程为 ±8  g    获取到的加速度计数据除以 4098   可以转化为带物理单位的数据 (g 代表重力加速度 物理学名词 一般情况下 g 取 9.8 m/s^2 为标准值)
-        // 设置为 0x34 加速度量程为 ±16 g    获取到的加速度计数据除以 2049   可以转化为带物理单位的数据 (g 代表重力加速度 物理学名词 一般情况下 g 取 9.8 m/s^2 为标准值)
+        // IMU963RA_CTRL1_XL / CTRL2_G：ODR 位 [7:4] 拉满 LSM6DSR 最高档 6667Hz (0xA)
+        // ODR 编码：0x1=12.5 … 0x5=208 … 0x7=833 … 0x8=1.66k … 0x9=3.33k … 0xA=6.66kHz
+        // 低半字节仅改量程；原逐飞默认 ODR 为 Acc 52Hz(0x3x)/Gyro 208Hz(0x5x)
+        //
+        // CTRL1_XL（ODR=6667Hz）：
+        //   0xA0 ±2g /16393；0xA8 ±4g /8197；0xAC ±8g /4098；0xA4 ±16g /2049  → 物理单位 g
+        // CTRL2_G（ODR=6667Hz）：
+        //   0xA2 ±125dps /228.6；0xA0 ±250 /114.3；0xA4 ±500 /57.1；
+        //   0xA8 ±1000 /28.6；0xAC ±2000 /14.3；0xA1 ±4000 /7.1  → 单位 °/s
         switch(IMU963RA_ACC_SAMPLE_DEFAULT)
         {
             default:
@@ -396,22 +400,22 @@ uint8 imu963ra_init (void)
             }break;
             case IMU963RA_ACC_SAMPLE_SGN_2G:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0x30);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0xA0);
                 imu963ra_transition_factor[0] = 16393;
             }break;
             case IMU963RA_ACC_SAMPLE_SGN_4G:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0x38);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0xA8);
                 imu963ra_transition_factor[0] = 8197;
             }break;
             case IMU963RA_ACC_SAMPLE_SGN_8G:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0x3C);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0xAC);
                 imu963ra_transition_factor[0] = 4098;
             }break;
             case IMU963RA_ACC_SAMPLE_SGN_16G:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0x34);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL1_XL, 0xA4);
                 imu963ra_transition_factor[0] = 2049;
             }break;
         }
@@ -420,13 +424,6 @@ uint8 imu963ra_init (void)
             break;
         }
 
-        // IMU963RA_CTRL2_G 寄存器
-        // 设置为 0x52 陀螺仪量程为 ±125  dps    获取到的陀螺仪数据除以 228.6   可以转化为带物理单位的数据 单位为 °/s
-        // 设置为 0x50 陀螺仪量程为 ±250  dps    获取到的陀螺仪数据除以 114.3   可以转化为带物理单位的数据 单位为 °/s
-        // 设置为 0x54 陀螺仪量程为 ±500  dps    获取到的陀螺仪数据除以 57.1    可以转化为带物理单位的数据 单位为 °/s
-        // 设置为 0x58 陀螺仪量程为 ±1000 dps    获取到的陀螺仪数据除以 28.6    可以转化为带物理单位的数据 单位为 °/s
-        // 设置为 0x5C 陀螺仪量程为 ±2000 dps    获取到的陀螺仪数据除以 14.3    可以转化为带物理单位的数据 单位为 °/s
-        // 设置为 0x51 陀螺仪量程为 ±4000 dps    获取到的陀螺仪数据除以 7.1     可以转化为带物理单位的数据 单位为 °/s
         switch(IMU963RA_GYRO_SAMPLE_DEFAULT)
         {
             default:
@@ -436,32 +433,32 @@ uint8 imu963ra_init (void)
             }break;
             case IMU963RA_GYRO_SAMPLE_SGN_125DPS:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0x52);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0xA2);
                 imu963ra_transition_factor[1] = 228.6;
             }break;
             case IMU963RA_GYRO_SAMPLE_SGN_250DPS:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0x50);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0xA0);
                 imu963ra_transition_factor[1] = 114.3;
             }break;
             case IMU963RA_GYRO_SAMPLE_SGN_500DPS:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0x54);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0xA4);
                 imu963ra_transition_factor[1] = 57.1;
             }break;
             case IMU963RA_GYRO_SAMPLE_SGN_1000DPS:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0x58);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0xA8);
                 imu963ra_transition_factor[1] = 28.6;
             }break;
             case IMU963RA_GYRO_SAMPLE_SGN_2000DPS:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0x5C);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0xAC);
                 imu963ra_transition_factor[1] = 14.3;
             }break;
             case IMU963RA_GYRO_SAMPLE_SGN_4000DPS:
             {
-                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0x51);
+                imu963ra_write_acc_gyro_register(IMU963RA_CTRL2_G, 0xA1);
                 imu963ra_transition_factor[1] = 7.1;
             }break;
         }

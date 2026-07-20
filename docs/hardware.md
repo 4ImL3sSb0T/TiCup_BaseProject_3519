@@ -127,7 +127,7 @@
 
 | 模块 | 要点 |
 |------|------|
-| IMU | SPI1 @ ~8 MHz；脚见 §1 |
+| IMU | SPI1 @ ~8 MHz；脚见 §1；硬件 ODR **Acc/Gyro 6667 Hz**（`CTRL1_XL`/`CTRL2_G` 高半字节 `0xA`）；软件 `imu_update` 仍 **1 kHz** |
 | IPS200 | `gui_app` → MujicaUI；竖屏 240×320；100 ms 刷新 |
 | 按键 | 上拉、低有效；`mjc_input_button.c` 与 `KEY_LIST` 一致 |
 
@@ -166,6 +166,7 @@ PIT 仅提供 1 ms；业务 soft_timer：
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | IMU963RA 硬件 ODR **Acc/Gyro → 6667 Hz**（LSM6DSR 最高档；原 ~52/208 Hz） |
 | 2026-07-20 | UART0 波特率 **921600 → 115200**（高波特率收包不稳） |
 | 2026-07-19 | `motor_init` 提前到 `fs_init` 之前；init 末尾 `motor_stop_all` |
 | 2026-07-19 | 对照代码复核：补方向/上电时序说明；修正 main.c 过时电机脚注释（曾误写 B10=DIR） |

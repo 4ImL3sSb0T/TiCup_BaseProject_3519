@@ -241,7 +241,7 @@ void imu_calibrate(bool use_flash) {
         // [修改]: 加速度计的 Z 轴通常会受到重力影响，校准时可以选择不使用 Z 轴数据，或者在静止状态下采集以平均重力加速度
         // acc_sum_z += imu963ra_acc_z;
         
-        // [修改]: 减少延时到 1ms，因为现在 ODR 已经是 1.66kHz，读取速度可以更快
+        // 硬件 ODR 已为 6667Hz；校准时 10ms 间隔足够隔开样本（不必跟满 ODR）
         system_delay_ms(10); 
         
         if (i % 100 == 0) {
