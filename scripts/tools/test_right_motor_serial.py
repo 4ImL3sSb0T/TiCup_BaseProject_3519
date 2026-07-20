@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Quick right-motor serial smoke test (UART0 debug @ 115200)."""
+"""Quick right-motor serial smoke test (UART0 debug @ 921600)."""
 
 import serial
 import sys
 import time
 
 PORT = "COM8"
-BAUD = 115200
+BAUD = 921600
 
 
 def send_cmd(ser: serial.Serial, cmd: str, wait: float = 0.4) -> str:

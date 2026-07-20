@@ -9,7 +9,7 @@ import sys
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="BaseProject_3519 serial host UI")
     parser.add_argument("--port", default="", help="Serial port, e.g. COM8")
-    parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default 115200)")
+    parser.add_argument("--baud", type=int, default=921600, help="Baud rate (default 921600)")
     parser.add_argument(
         "--self-check",
         action="store_true",

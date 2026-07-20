@@ -7,7 +7,7 @@ import sys
 import time
 
 PORT = "COM8"
-BAUD = 115200
+BAUD = 921600
 
 
 def drain(ser: serial.Serial, wait: float = 0.12) -> str:

@@ -25,7 +25,7 @@ static float motor_speed_pid_ki = 200.0f;
 
 /*
  * 纸飞机 TEXT 协议：{window}num,num\n → 分窗绘图
- * 控制 2ms 一拍，分频后约 50Hz，避免 115200 堵口。
+ * 控制 2ms 一拍，分频后约 50Hz，降低串口绘图流量。
  * 格式：{motor_l}<目标>,<实测>
  */
 #ifndef MOTOR_L_PLOT_ENABLE

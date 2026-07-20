@@ -19,7 +19,7 @@ from host.protocol import (
     parse_motor_status,
 )
 
-DEFAULT_BAUD = 115200
+DEFAULT_BAUD = 921600
 MAX_CMD_LEN = 128
 # Bound pending ACK map so UI-only sessions (no wait_ack) do not grow forever.
 _MAX_ACK_RESULTS = 64

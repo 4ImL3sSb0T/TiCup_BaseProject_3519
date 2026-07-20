@@ -44,7 +44,7 @@
 | 右编码器 | TIM_G9 正交 | **B7 / B9** | polarity=1；B7=CH1 |
 | 底盘 | software | — | `chassis_init` + 10 ms `chassis_update` |
 | 系统 1 ms | PIT_TIM_G12 | — | `sys_time_ms` |
-| 命令 + 日志 | UART0 | **A10 TX / A11 RX** | 115200；`SYS_LOG_UART` |
+| 命令 + 日志 | UART0 | **A10 TX / A11 RX** | 921600；`SYS_LOG_UART` |
 | 核心板 LED | GPIO | **A14** | 500 ms 心跳 |
 | IMU963RA | SPI1 | **B23/B22/B21 + CS B19** | `imu_init` |
 | IPS200 | SPI0 | **A12/A9/A7/A15/A8/A13** | SCK/MOSI/RST/DC/CS/BLK |
