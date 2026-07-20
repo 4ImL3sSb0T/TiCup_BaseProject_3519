@@ -2,6 +2,8 @@
 #include "MadgwickAHRS/MadgwickAHRS.h"
 #include "zf_device_imu963ra.h"
 #include "common/filter/low_pass_filter.h"
+#include "common/tools/common_def.h"
+#include "service/com/param.h"
 #include "service/sys/sys_log.h"
 
 // IMU校准时采样的样本数量
@@ -31,11 +33,73 @@ vec3f imu_calibrate_gyro_offset = {0};
 vec3f imu_calibrate_mag_offset = {0.308f, 0.1956f, 0.1531f};
 vec3f imu_calibrate_mag_scale = {0.937f, 1.03f, 1.01f};
 
+/* Flash 有效标志：param_load 后为 1 表示已有一次成功校准写入 */
+static uint8_t imu_calib_valid = 0;
+static uint8_t imu_mag_calib_valid = 0;
+
 static imu_mode_t imu_mode = imu_mode_no_mag;
 
 // 低通滤波器实例
 static low_pass_filter_t lpf_acc_x, lpf_acc_y, lpf_acc_z;
 static low_pass_filter_t lpf_gyro_x, lpf_gyro_y, lpf_gyro_z;
+
+static void imu_log_acc_gyro_offsets(const char *tag)
+{
+    sys_log_text(info, "IMU: %s Gyro offsets (x=%.3f, y=%.3f, z=%.3f)",
+                 tag,
+                 imu_calibrate_gyro_offset.x,
+                 imu_calibrate_gyro_offset.y,
+                 imu_calibrate_gyro_offset.z);
+    sys_log_text(info, "IMU: %s Acc offsets (x=%.3f, y=%.3f, z=%.3f)",
+                 tag,
+                 imu_calibrate_acc_offset.x,
+                 imu_calibrate_acc_offset.y,
+                 imu_calibrate_acc_offset.z);
+}
+
+static void imu_log_mag_params(const char *tag)
+{
+    sys_log_text(info, "IMU: %s Mag offsets (x=%.3f, y=%.3f, z=%.3f)",
+                 tag,
+                 imu_calibrate_mag_offset.x,
+                 imu_calibrate_mag_offset.y,
+                 imu_calibrate_mag_offset.z);
+    sys_log_text(info, "IMU: %s Mag scales (x=%.3f, y=%.3f, z=%.3f)",
+                 tag,
+                 imu_calibrate_mag_scale.x,
+                 imu_calibrate_mag_scale.y,
+                 imu_calibrate_mag_scale.z);
+}
+
+static void imu_register_params(void)
+{
+    /* 五组常用零偏：gyro xyz + acc xy；z 一并持久化便于完整恢复 */
+    assert_fun(param_add("imu_gyro_ofs_x", PARAM_TYPE_FLOAT, &imu_calibrate_gyro_offset.x, true));
+    assert_fun(param_add("imu_gyro_ofs_y", PARAM_TYPE_FLOAT, &imu_calibrate_gyro_offset.y, true));
+    assert_fun(param_add("imu_gyro_ofs_z", PARAM_TYPE_FLOAT, &imu_calibrate_gyro_offset.z, true));
+    assert_fun(param_add("imu_acc_ofs_x",  PARAM_TYPE_FLOAT, &imu_calibrate_acc_offset.x,  true));
+    assert_fun(param_add("imu_acc_ofs_y",  PARAM_TYPE_FLOAT, &imu_calibrate_acc_offset.y,  true));
+    assert_fun(param_add("imu_acc_ofs_z",  PARAM_TYPE_FLOAT, &imu_calibrate_acc_offset.z,  true));
+
+    assert_fun(param_add("imu_mag_ofs_x",  PARAM_TYPE_FLOAT, &imu_calibrate_mag_offset.x,  true));
+    assert_fun(param_add("imu_mag_ofs_y",  PARAM_TYPE_FLOAT, &imu_calibrate_mag_offset.y,  true));
+    assert_fun(param_add("imu_mag_ofs_z",  PARAM_TYPE_FLOAT, &imu_calibrate_mag_offset.z,  true));
+    assert_fun(param_add("imu_mag_scl_x",  PARAM_TYPE_FLOAT, &imu_calibrate_mag_scale.x,  true));
+    assert_fun(param_add("imu_mag_scl_y",  PARAM_TYPE_FLOAT, &imu_calibrate_mag_scale.y,  true));
+    assert_fun(param_add("imu_mag_scl_z",  PARAM_TYPE_FLOAT, &imu_calibrate_mag_scale.z,  true));
+
+    assert_fun(param_add("imu_calib_valid",     PARAM_TYPE_UINT8, &imu_calib_valid,     true));
+    assert_fun(param_add("imu_mag_calib_valid", PARAM_TYPE_UINT8, &imu_mag_calib_valid, true));
+}
+
+static void imu_save_params(const char *what)
+{
+    if (param_save() == 0) {
+        sys_log_text(info, "IMU: %s saved to flash", what);
+    } else {
+        sys_log_text(error, "IMU: %s param_save failed", what);
+    }
+}
 
 // IMU初始化函数
 exit_code_t imu_init(imu_mode_t mode) {
@@ -59,6 +123,8 @@ exit_code_t imu_init(imu_mode_t mode) {
     // low_pass_filter_init(&lpf_gyro_x, gyro_cutoff_freq, sample_freq);
     // low_pass_filter_init(&lpf_gyro_y, gyro_cutoff_freq, sample_freq);
     // low_pass_filter_init(&lpf_gyro_z, gyro_cutoff_freq, sample_freq);
+
+    imu_register_params();
 
     sys_log_text(info, "IMU: Initialization completed successfully");
     return EXIT_OK;
@@ -139,7 +205,17 @@ vec3f imu_get_mag() {
 }
 
 // IMU校准函数（校准加速度计和陀螺仪）
-void imu_calibrate() {
+void imu_calibrate(bool use_flash) {
+    if (use_flash && imu_calib_valid != 0) {
+        sys_log_text(info, "IMU: using flash acc/gyro calibration");
+        imu_log_acc_gyro_offsets("flash");
+        return;
+    }
+
+    if (use_flash) {
+        sys_log_text(info, "IMU: no flash acc/gyro calib, running calibration...");
+    }
+
     // [修改]: 增加采样数量到 1000，提高校准精度
     const int calibrate_samples = 1000;
     sys_log_text(info, "IMU: Starting calibration (samples=%d)...", calibrate_samples);
@@ -181,17 +257,26 @@ void imu_calibrate() {
     imu_calibrate_acc_offset.x = (float)(acc_sum_x / calibrate_samples);
     imu_calibrate_acc_offset.y = (float)(acc_sum_y / calibrate_samples);
     imu_calibrate_acc_offset.z = (float)(acc_sum_z / calibrate_samples);
+
+    imu_calib_valid = 1;
     
     sys_log_text(info, "IMU: Calibration completed");
-    // 打印浮点型 Offset
-    sys_log_text(info, "IMU: Gyro offsets (x=%.3f, y=%.3f, z=%.3f)", 
-                 imu_calibrate_gyro_offset.x, imu_calibrate_gyro_offset.y, imu_calibrate_gyro_offset.z);
-    sys_log_text(info, "IMU: Acc offsets (x=%.3f, y=%.3f", 
-                 imu_calibrate_acc_offset.x, imu_calibrate_acc_offset.y);
+    imu_log_acc_gyro_offsets("new");
+    imu_save_params("acc/gyro calib");
 }
 
 // 磁力计校准函数（需要在不同方向旋转设备）
-void imu_calibrate_mag() {
+void imu_calibrate_mag(bool use_flash) {
+    if (use_flash && imu_mag_calib_valid != 0) {
+        sys_log_text(info, "IMU: using flash magnetometer calibration");
+        imu_log_mag_params("flash");
+        return;
+    }
+
+    if (use_flash) {
+        sys_log_text(info, "IMU: no flash mag calib, running calibration...");
+    }
+
     sys_log_text(info, "IMU: Starting magnetometer calibration (samples=%d)...", IMU_MAG_CALIBRATE_SAMPLES);
     sys_log_text(warning, "IMU: Rotate the device in all directions during calibration!");
     
@@ -239,12 +324,12 @@ void imu_calibrate_mag() {
     if (mag_x_range > 0.01f) imu_calibrate_mag_scale.x = avg_range / mag_x_range;
     if (mag_y_range > 0.01f) imu_calibrate_mag_scale.y = avg_range / mag_y_range;
     if (mag_z_range > 0.01f) imu_calibrate_mag_scale.z = avg_range / mag_z_range;
+
+    imu_mag_calib_valid = 1;
     
     sys_log_text(info, "IMU: Magnetometer calibration completed");
-    sys_log_text(info, "IMU: Mag offsets (x=%.3f, y=%.3f, z=%.3f)", 
-                 imu_calibrate_mag_offset.x, imu_calibrate_mag_offset.y, imu_calibrate_mag_offset.z);
-    sys_log_text(info, "IMU: Mag scales (x=%.3f, y=%.3f, z=%.3f)", 
-                 imu_calibrate_mag_scale.x, imu_calibrate_mag_scale.y, imu_calibrate_mag_scale.z);
+    imu_log_mag_params("new");
+    imu_save_params("mag calib");
 }
 
 vec3f imu_get_mag_offset() {
@@ -254,4 +339,3 @@ vec3f imu_get_mag_offset() {
 vec3f imu_get_mag_scale() {
 	return imu_calibrate_mag_scale;
 }
-

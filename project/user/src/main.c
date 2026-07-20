@@ -124,14 +124,16 @@ static void app_init(void)
      * 初始化顺序（按依赖）：
      *   clock/debug/dwt → log → event → soft_timer → param
      *   → motor(+encoder)【尽早，fs/GUI 之前把 PWM 置 0】
-     *   → fs → cmd → LED → imu → chassis → param_load → GUI → 节拍
+     *   → fs → cmd → LED → imu → chassis → param_load
+     *   → imu_calibrate(use_flash) → GUI → 节拍
      *
      * 注意：
      *   - event_init() 内会调 sys_log_text；log 须先 init。
      *   - soft_timer 创建/启动依赖 event。
      *   - motor 仅依赖 clock + log + param_init（param_add）；不依赖 fs。
      *   - fs 可能较慢（mount/format），故放在 motor 之后，缩短电机脚悬空时间。
-     *   - param_load 须在全部 param_add（motor/chassis）且 fs 就绪之后。
+     *   - param_load 须在全部 param_add（motor/chassis/imu）且 fs 就绪之后。
+     *   - imu_calibrate(true) 依赖 param_load 已恢复 imu_calib_valid / 零偏。
      *   - 当前 SYS_LOG_UART：不 init 无线，B7 留给右编码器。
      *   - GUI 占用 SPI0 屏脚；WiFi SPI 仍暂关。
      */
@@ -179,13 +181,13 @@ static void app_init(void)
     gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
     sys_log_text(info, "LED heartbeat on A14");
 
-    /* 10. IMU（6 轴，无磁力计） */
+    /* 10. IMU（6 轴，无磁力计）— 仅 init + 注册参数，校准放到 param_load 之后 */
+    exit_code_t imu_ret = EXIT_FAIL;
     {
-        exit_code_t imu_ret = imu_init(imu_mode_no_mag);
+        imu_ret = imu_init(imu_mode_no_mag);
         if (imu_ret != EXIT_OK) {
             sys_log_text(error, "imu_init failed");
         } else {
-            imu_calibrate();
             sys_log_text(info, "imu_init ok (no_mag)");
         }
 
@@ -203,6 +205,11 @@ static void app_init(void)
     if (param_load("boot") != 0) {
         sys_log_text(warning, "param_load boot failed (using defaults)");
         motor_apply_param(); /* 仍把当前 RAM 注册表（默认）刷进 PID */
+    }
+
+    /* 12b. IMU 校准：优先用 Flash；无有效参数则现场校准并写入 */
+    if (imu_ret == EXIT_OK) {
+        imu_calibrate(true);
     }
 
     /* 13. GUI：IPS200 + 板载按键（自建 5ms/100ms soft_timer） */
