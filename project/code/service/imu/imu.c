@@ -185,7 +185,7 @@ void imu_update() {
     }
     // 从Madgwick算法中获取欧拉角形式的姿态
     MadgwickAHRS_getEuler(&imu_attitude.x, &imu_attitude.y, &imu_attitude.z);
-    imu_attitude.y *= imu_calibrate_yaw_gain;
+    imu_attitude.z *= imu_calibrate_yaw_gain;
 }
 
 // 获取姿态数据
