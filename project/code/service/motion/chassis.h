@@ -30,7 +30,7 @@ extern "C" {
  */
 #define CHASSIS_HALF_TRACK_DEFAULT      (2.0f)
 #define CHASSIS_MAX_V_DEFAULT           (18.0f)
-#define CHASSIS_MAX_OMEGA_DEFAULT       (12.0f)
+#define CHASSIS_MAX_OMEGA_DEFAULT       (45.0f)
 
 /** 开环：v/ω → duty；约 MOTOR_MAX_DUTY/CHASSIS_MAX_V ≈ 7200/18 */
 #define CHASSIS_OL_V_SCALE_DEFAULT      (340.0f)

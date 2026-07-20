@@ -68,7 +68,7 @@ class DriveTab:
         self.v_slider.bind("<ButtonRelease-1>", self._on_slider_release)
 
         self.w_slider = ctk.CTkSlider(
-            left, from_=-12, to=12, number_of_steps=240, command=self._on_vw_slide
+            left, from_=-45, to=45, number_of_steps=450, command=self._on_vw_slide
         )
         self.w_slider.set(0)
         self.w_slider.pack(fill="x", padx=12, pady=(8, 2))
