@@ -52,13 +52,13 @@ exit_code_t imu_init(imu_mode_t mode) {
     
     sys_log_text(info, "IMU: Initializing low-pass filters (acc_cutoff=%.1fHz, sample=%.1fHz)...", acc_cutoff_freq, sample_freq);
 
-    low_pass_filter_init(&lpf_acc_x, acc_cutoff_freq, sample_freq);
-    low_pass_filter_init(&lpf_acc_y, acc_cutoff_freq, sample_freq);
-    low_pass_filter_init(&lpf_acc_z, acc_cutoff_freq, sample_freq);
+    // low_pass_filter_init(&lpf_acc_x, acc_cutoff_freq, sample_freq);
+    // low_pass_filter_init(&lpf_acc_y, acc_cutoff_freq, sample_freq);
+    // low_pass_filter_init(&lpf_acc_z, acc_cutoff_freq, sample_freq);
     
-    low_pass_filter_init(&lpf_gyro_x, gyro_cutoff_freq, sample_freq);
-    low_pass_filter_init(&lpf_gyro_y, gyro_cutoff_freq, sample_freq);
-    low_pass_filter_init(&lpf_gyro_z, gyro_cutoff_freq, sample_freq);
+    // low_pass_filter_init(&lpf_gyro_x, gyro_cutoff_freq, sample_freq);
+    // low_pass_filter_init(&lpf_gyro_y, gyro_cutoff_freq, sample_freq);
+    // low_pass_filter_init(&lpf_gyro_z, gyro_cutoff_freq, sample_freq);
 
     sys_log_text(info, "IMU: Initialization completed successfully");
     return EXIT_OK;
@@ -186,8 +186,8 @@ void imu_calibrate() {
     // 打印浮点型 Offset
     sys_log_text(info, "IMU: Gyro offsets (x=%.3f, y=%.3f, z=%.3f)", 
                  imu_calibrate_gyro_offset.x, imu_calibrate_gyro_offset.y, imu_calibrate_gyro_offset.z);
-    sys_log_text(info, "IMU: Acc offsets (x=%.3f, y=%.3f, z=%.3f)", 
-                 imu_calibrate_acc_offset.x, imu_calibrate_acc_offset.y, imu_calibrate_acc_offset.z);
+    sys_log_text(info, "IMU: Acc offsets (x=%.3f, y=%.3f", 
+                 imu_calibrate_acc_offset.x, imu_calibrate_acc_offset.y);
 }
 
 // 磁力计校准函数（需要在不同方向旋转设备）
