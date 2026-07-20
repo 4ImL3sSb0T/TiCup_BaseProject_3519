@@ -16,11 +16,20 @@ uv sync
 
 ## 启动上位机
 
+推荐（在 `scripts` 目录下，用包方式）：
+
 ```powershell
 cd scripts
 uv run python -m host
 uv run python -m host --port COM8
 uv run python -m host --self-check   # 无硬件，协议解析自检
+```
+
+也可从仓库根目录直接跑入口（venv 已激活时）：
+
+```powershell
+python scripts/host/main.py
+python scripts/host/main.py --port COM8
 ```
 
 UI 结构（`host/ui/`）：`app.py` 壳 + 连接/分发；`tabs/` 驾驶·电机·参数·控制台；`plot.py` 遥测曲线。

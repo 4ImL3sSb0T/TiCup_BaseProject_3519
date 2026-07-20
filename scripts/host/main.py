@@ -4,6 +4,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+# Allow both `python -m host` (cwd/scripts on path) and direct file launch:
+#   python scripts/host/main.py
+# Without this, sys.path[0] is scripts/host/ and `import host` fails.
+_SCRIPTS_ROOT = Path(__file__).resolve().parent.parent
+if str(_SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_ROOT))
 
 
 def main(argv: list[str] | None = None) -> int:
