@@ -144,7 +144,7 @@ load
 | `motor_ki` | FLOAT | 200 | 速度环 Ki |
 | `chassis_half_track` | FLOAT | 2.0 | 半轮距（运动学） |
 | `chassis_max_v` | FLOAT | 18.0 | 线速度限幅 |
-| `chassis_max_omega` | FLOAT | 45.0 | 角速度限幅（°/s，yaw_rate） |
+| `chassis_max_omega` | FLOAT | 80.0 | 角速度限幅（°/s，yaw_rate） |
 | `chassis_ol_v_scale` | FLOAT | 340 | 开环 v→duty 比例 |
 | `chassis_ol_w_scale` | FLOAT | 250 | 开环 ω→duty 比例 |
 | `chassis_omega_to_wheel` | FLOAT | 0.15 | IMU deg/s → 轮速域 |
