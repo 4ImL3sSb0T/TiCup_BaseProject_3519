@@ -384,7 +384,10 @@ void chassis_update(void)
             yaw = chassis_read_yaw_deg();
             heading_err = wrap_deg(s_target_heading - yaw);
             gyro_z = chassis_read_gyro_z();
-            omega_cmd_deg = pid_calculate(&s_heading_pid, heading_err, 0.0f);
+            // omega_cmd_deg = pid_calculate(&s_heading_pid, heading_err, 0.0f);
+            if (heading_err > 3.0f) omega_cmd_deg = 75.0f;
+            else if (heading_err < -3.0f) omega_cmd_deg = -75.0f;
+            else omega_cmd_deg = 0.0f;
             omega_cmd_deg = clampf(omega_cmd_deg, -chassis_max_omega, chassis_max_omega);
             omega_out_deg = pid_calculate(&s_yaw_rate_pid, omega_cmd_deg, gyro_z);
             omega_wheel = omega_out_deg * chassis_omega_to_wheel;
