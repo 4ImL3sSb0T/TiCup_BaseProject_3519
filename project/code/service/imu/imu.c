@@ -33,7 +33,8 @@ vec3f imu_calibrate_gyro_offset = {0};
 vec3f imu_calibrate_mag_offset = {0.308f, 0.1956f, 0.1531f};
 vec3f imu_calibrate_mag_scale = {0.937f, 1.03f, 1.01f};
 
-float imu_calibrate_yaw_gain = 0.88f;
+/* 陀螺 Z 轴灵敏度增益（进 AHRS 前乘到 gyro.z；1.0 = 不修正） */
+float imu_calibrate_yaw_gain = 1.17f;
 
 /* Flash 有效标志：param_load 后为 1 表示已有一次成功校准写入 */
 static uint8_t imu_calib_valid = 0;
@@ -159,6 +160,9 @@ void imu_update() {
     imu_gyro.x = imu963ra_gyro_transition(raw_gyro_x);
     imu_gyro.y = imu963ra_gyro_transition(raw_gyro_y);
     imu_gyro.z = imu963ra_gyro_transition(raw_gyro_z);
+    /* 偏航灵敏度修正：进 AHRS 前缩放 gz（imu_get_gyro 同步生效，与姿态积分一致）。
+     * 标定：水平准确转 360°，记 yaw 变化量 Δ，gain_new = gain_old * (360 / Δ) */
+    imu_gyro.z *= imu_calibrate_yaw_gain;
 
     // 对陀螺仪数据进行低通滤波
     // imu_gyro.x = low_pass_filter_update(&lpf_gyro_x, imu_gyro.x);
@@ -183,9 +187,8 @@ void imu_update() {
         MadgwickAHRSupdateIMU(imu_gyro.x * DEG2RAD, imu_gyro.y * DEG2RAD, imu_gyro.z * DEG2RAD, 
                            imu_accel.x, imu_accel.y, imu_accel.z);
     }
-    // 从Madgwick算法中获取欧拉角形式的姿态
+    // 从Madgwick算法中获取欧拉角形式的姿态（x=roll, y=pitch, z=yaw）
     MadgwickAHRS_getEuler(&imu_attitude.x, &imu_attitude.y, &imu_attitude.z);
-    imu_attitude.z *= imu_calibrate_yaw_gain;
 }
 
 // 获取姿态数据
