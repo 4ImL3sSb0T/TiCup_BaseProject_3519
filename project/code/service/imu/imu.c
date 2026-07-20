@@ -186,6 +186,8 @@ void imu_calibrate() {
     // 打印浮点型 Offset
     sys_log_text(info, "IMU: Gyro offsets (x=%.3f, y=%.3f, z=%.3f)", 
                  imu_calibrate_gyro_offset.x, imu_calibrate_gyro_offset.y, imu_calibrate_gyro_offset.z);
+    sys_log_text(info, "IMU: Acc offsets (x=%.3f, y=%.3f, z=%.3f)", 
+                 imu_calibrate_acc_offset.x, imu_calibrate_acc_offset.y, imu_calibrate_acc_offset.z);
 }
 
 // 磁力计校准函数（需要在不同方向旋转设备）
