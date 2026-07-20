@@ -33,6 +33,8 @@ vec3f imu_calibrate_gyro_offset = {0};
 vec3f imu_calibrate_mag_offset = {0.308f, 0.1956f, 0.1531f};
 vec3f imu_calibrate_mag_scale = {0.937f, 1.03f, 1.01f};
 
+float imu_calibrate_yaw_gain = 0.88f;
+
 /* Flash 有效标志：param_load 后为 1 表示已有一次成功校准写入 */
 static uint8_t imu_calib_valid = 0;
 static uint8_t imu_mag_calib_valid = 0;
@@ -90,6 +92,7 @@ static void imu_register_params(void)
 
     assert_fun(param_add("imu_calib_valid",     PARAM_TYPE_UINT8, &imu_calib_valid,     true));
     assert_fun(param_add("imu_mag_calib_valid", PARAM_TYPE_UINT8, &imu_mag_calib_valid, true));
+    assert_fun(param_add("imu_calib_yaw_gain",  PARAM_TYPE_FLOAT, &imu_calibrate_yaw_gain, true));
 }
 
 static void imu_save_params(const char *what)
@@ -182,6 +185,7 @@ void imu_update() {
     }
     // 从Madgwick算法中获取欧拉角形式的姿态
     MadgwickAHRS_getEuler(&imu_attitude.x, &imu_attitude.y, &imu_attitude.z);
+    imu_attitude.y *= imu_calibrate_yaw_gain;
 }
 
 // 获取姿态数据
@@ -242,7 +246,7 @@ void imu_calibrate(bool use_flash) {
         // acc_sum_z += imu963ra_acc_z;
         
         // 硬件 ODR 已为 6667Hz；校准时 10ms 间隔足够隔开样本（不必跟满 ODR）
-        system_delay_ms(10); 
+        system_delay_ms(1); 
         
         if (i % 100 == 0) {
             sys_log_text(debug, "IMU: Calibration progress: %d/%d", i, calibrate_samples);
@@ -304,7 +308,7 @@ void imu_calibrate_mag(bool use_flash) {
             sys_log_text(debug, "IMU: Mag calibration progress: %d/%d", i, IMU_MAG_CALIBRATE_SAMPLES);
         }
         
-        system_delay_ms(100); // 延时
+        system_delay_ms(10); // 延时
     }
     
     // 计算硬铁偏移（每个轴的中心点）

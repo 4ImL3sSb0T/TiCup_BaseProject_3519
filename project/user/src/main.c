@@ -209,7 +209,7 @@ static void app_init(void)
 
     /* 12b. IMU 校准：优先用 Flash；无有效参数则现场校准并写入 */
     if (imu_ret == EXIT_OK) {
-        imu_calibrate(true);
+        imu_calibrate(false);
     }
 
     /* 13. GUI：IPS200 + 板载按键（自建 5ms/100ms soft_timer） */
