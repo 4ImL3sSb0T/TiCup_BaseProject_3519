@@ -185,6 +185,7 @@ static void app_init(void)
         if (imu_ret != EXIT_OK) {
             sys_log_text(error, "imu_init failed");
         } else {
+            imu_calibrate();
             sys_log_text(info, "imu_init ok (no_mag)");
         }
 
