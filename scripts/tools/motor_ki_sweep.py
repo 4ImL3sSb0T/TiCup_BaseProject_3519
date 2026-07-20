@@ -6,7 +6,7 @@ import serial
 import time
 
 PORT = "COM8"
-BAUD = 921600
+BAUD = 115200
 KP_FIXED = 150.0
 KI_LIST = [200.0, 400.0, 600.0]
 TARGET = 8.0

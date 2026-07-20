@@ -10,7 +10,7 @@ _CONFIG_PATH = Path(__file__).resolve().parent / "host_config.json"
 
 _DEFAULTS: dict[str, Any] = {
     "port": "",
-    "baud": 921600,
+    "baud": 115200,
     "poll_enabled": True,
     "poll_ms": 400,
 }

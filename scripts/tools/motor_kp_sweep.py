@@ -6,7 +6,7 @@ import serial
 import time
 
 PORT = "COM8"
-BAUD = 921600
+BAUD = 115200
 TARGET = 8.0
 SETTLE_S = 3.2
 SAMPLE_DT = 0.4
