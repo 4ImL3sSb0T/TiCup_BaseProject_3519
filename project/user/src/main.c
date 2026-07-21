@@ -25,6 +25,8 @@
 #include "service/motion/motor.h"
 #include "service/motion/encoder.h"
 #include "service/motion/chassis.h"
+#include "service/motion/track_follow.h"
+#include "driver/track.h"
 #include "service/imu/imu.h"
 #include "service/gui/gui_app.h"
 
@@ -55,6 +57,7 @@
 #define IMU_UPDATE_MS          (1U)
 #define MOTION_UPDATE_MS       (2U)
 #define CHASSIS_UPDATE_MS      (10U)
+#define TRACK_FOLLOW_UPDATE_MS (10U)
 #define LED_BLINK_INTERVAL_MS   (500U)
 #define LED_PIN                 (A14)
 
@@ -92,6 +95,15 @@ static void chassis_task(const event_t *event, void *user_data)
     (void)user_data;
     chassis_update();
 }
+
+#if TRACK_ENABLE
+static void track_follow_task(const event_t *event, void *user_data)
+{
+    (void)event;
+    (void)user_data;
+    track_follow_update();
+}
+#endif
 
 /* 核心板蓝色 LED 心跳（E01_gpio_demo: A14 翻转） */
 static void led_blink_task(const event_t *event, void *user_data)
@@ -198,6 +210,15 @@ static void app_init(void)
             sys_log_text(info, "chassis_init ok");
             chassis_set_imu_ready(imu_ret == EXIT_OK);
         }
+
+#if TRACK_ENABLE
+        /* 11b. 循迹控制（依赖 chassis + driver/track；定脚后置 TRACK_ENABLE=1） */
+        if (track_follow_init() != EXIT_OK) {
+            sys_log_text(error, "track_follow_init failed");
+        } else {
+            sys_log_text(info, "track_follow_init ok");
+        }
+#endif
     }
 
     /* 12. 全部 param_add 完成后从 LFS /param.txt 恢复
@@ -228,12 +249,20 @@ static void app_init(void)
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
+#if TRACK_ENABLE
+    (void)app_start_timer(TRACK_FOLLOW_UPDATE_MS, track_follow_task, "track");
+#endif
     // (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
 
     /* 16. 开全局中断 */
     interrupt_global_enable(0);
 
-    sys_log_text(info, "init done. try: help / chassis status / motor (UART0); GUI keys A30/A31/B0/B1");
+    sys_log_text(info,
+                 "init done. try: help / chassis status / motor"
+#if TRACK_ENABLE
+                 " / track status"
+#endif
+                 " (UART0); GUI keys A30/A31/B0/B1");
 }
 
 int main(void)

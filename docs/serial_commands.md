@@ -82,6 +82,7 @@ chassis status\n
 | `set` / `get` / `show` / `export` / `save` / `load` | 参数系统 | `param.c` |
 | `motor` | 单/双电机控制 | `motor.c` |
 | `chassis` | 差速底盘控制 | `chassis.c` |
+| `track` | 光电循迹（传感+闭环） | `track_follow.c` + `driver/track.c` |
 
 > 旧文档中的 `navigator` / `estimator` / `openart` / `sokoban` / `timer` 等 **当前未注册**，发送会返回 `EXIT_NOT_SUPPORTED`。
 
@@ -103,6 +104,7 @@ Available commands:
  - load
  - motor
  - chassis
+ - track
  - help
 {cmd_ack} seq=-1 result=EXIT_OK ctx=help_listed
 ```
@@ -278,9 +280,45 @@ chassis param
 
 ---
 
-## 7. 推荐调试流程
+## 7. track 命令（光电循迹）
 
-### 7.1 通路自检
+> **分层**：`driver/track` 只做采样/极性/偏差；`service/motion/track_follow` 做状态机 + PID(ω) + 写 chassis。  
+> **启用**：`driver/track.h` 中 `TRACK_ENABLE=1` 且定脚后才会 `track_follow_init` + 10 ms 任务。默认 `TRACK_ENABLE=0` 时命令返回 `track_not_init`。  
+> **后端**：`TRACK_SENSOR_BACKEND` — `0` 五路数字 GPIO / `1` 八路 GS08RA。  
+> **冲突**：循迹运行时勿并行 `chassis openloop/set` 等，以免抢写底盘。
+
+```text
+track <status|start|stop|polarity|cal|param> ...
+```
+
+| 语法 | 说明 |
+|------|------|
+| `track status` | 状态 / mask / error / backend / 极性 |
+| `track start [v]` | 开始循迹（SPEED 模式）；可选线速度 |
+| `track stop` | 停止并 chassis idle |
+| `track polarity 0\|1` | 赛道有效电平（数字）/ 黑白极性（GS08） |
+| `track cal max` / `track cal min` | **仅 GS08**：标定白/黑 |
+| `track param` | 将 `track_kp/ki/kd` 等刷进 PID |
+
+相关 param：`track_base_v`、`track_kp`/`ki`/`kd`、`track_lost_v`/`track_lost_w`/`track_lost_ms`、`track_omega_max`、`track_polarity`；GS08 另有 `track_gs_thr`。
+
+### 示例
+
+```text
+track status
+track polarity 0
+track start 8
+track stop
+
+set track_kp 2.0
+track param
+```
+
+---
+
+## 8. 推荐调试流程
+
+### 8.1 通路自检
 
 ```text
 help
@@ -291,7 +329,7 @@ motor 0x3 status
 
 能收到 `help` 列表和 `{cmd_ack}` 即串口与命令服务正常。
 
-### 7.2 单电机开环
+### 8.2 单电机开环
 
 ```text
 motor 0x1 mode openloop
@@ -302,7 +340,7 @@ motor 0x1 stop
 
 确认左右转向是否与预期一致（不对可查 DIR / `dir_reverse`）。
 
-### 7.3 单电机速度环
+### 8.3 单电机速度环
 
 ```text
 motor 0x1 mode speed
@@ -311,7 +349,7 @@ motor 0x1 status
 motor 0x1 stop
 ```
 
-### 7.4 底盘开环 / 速度
+### 8.4 底盘开环 / 速度
 
 ```text
 chassis mode openloop
@@ -324,7 +362,7 @@ chassis set 6 1
 chassis stop
 ```
 
-### 7.5 改参并持久化
+### 8.5 改参并持久化
 
 ```text
 set motor_kp 140
@@ -341,7 +379,7 @@ get motor_kp
 
 ---
 
-## 8. 常见问题
+## 9. 常见问题
 
 | 现象 | 排查 |
 |------|------|
@@ -356,7 +394,7 @@ get motor_kp
 
 ---
 
-## 9. 带序号联调示例
+## 10. 带序号联调示例
 
 ```text
 @1 help

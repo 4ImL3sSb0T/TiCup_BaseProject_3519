@@ -520,6 +520,26 @@
               <FilePath>..\code\service\motion\chassis.h</FilePath>
             </File>
             <File>
+              <FileName>track.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\driver\track.c</FilePath>
+            </File>
+            <File>
+              <FileName>track.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\driver\track.h</FilePath>
+            </File>
+            <File>
+              <FileName>track_follow.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\service\motion\track_follow.c</FilePath>
+            </File>
+            <File>
+              <FileName>track_follow.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\service\motion\track_follow.h</FilePath>
+            </File>
+            <File>
               <FileName>imu.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\service\imu\imu.c</FilePath>
