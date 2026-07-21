@@ -150,7 +150,7 @@ load
 | `chassis_ol_v_scale` | FLOAT | 340 | 开环 v→duty 比例 |
 | `chassis_ol_w_scale` | FLOAT | 250 | 开环 ω→duty 比例 |
 | `chassis_omega_to_wheel` | FLOAT | 0.15 | IMU deg/s → 轮速域 |
-| `chassis_imu_yaw_sign` | FLOAT | -1.0 | 航向/陀螺符号（乘到 gyro.z / yaw）；方向反了改符号 |
+| `chassis_imu_yaw_sign` | FLOAT | 1.0 | 航向/陀螺符号（乘到 gyro.z / yaw）；**不持久化**，上电用固件默认 |
 | `chassis_yaw_rate_kp` | FLOAT | 1.2 | 角速度环 Kp |
 | `chassis_yaw_rate_ki` | FLOAT | 0.3 | 角速度环 Ki |
 | `chassis_heading_kp` | FLOAT | 2.0 | 航向环 Kp（对角度误差） |

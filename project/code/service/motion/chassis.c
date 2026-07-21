@@ -88,13 +88,19 @@ static void chassis_reset_pids(void)
 
 /**
  * 差速运动学：轮速单位与 motor 目标速度一致
- * v_l = v - ω * half_track
- * v_r = v + ω * half_track
+ * 车体约定：正 v 前进，正 ω 逆时针（CCW）。
+ * 本车左右电机同号轮速对应车体后退，v/ω 正负同时反，进运动学前统一取反：
+ *   v_l = -v - (-ω) * half_track
+ *   v_r = -v + (-ω) * half_track
  */
 static void chassis_kinematics(float v, float omega, float *left, float *right)
 {
     float wl;
     float wr;
+
+    /* 车体 → 轮速：符号翻转（见上） */
+    v = -v;
+    omega = -omega;
 
     v = clampf(v, -chassis_max_v, chassis_max_v);
     omega = clampf(omega, -chassis_max_omega, chassis_max_omega);
@@ -110,6 +116,10 @@ static void chassis_apply_openloop(float v, float omega)
 {
     float duty_l;
     float duty_r;
+
+    /* 与 kinematics 相同：车体 v/ω 符号翻转到电机 duty */
+    v = -v;
+    omega = -omega;
 
     v = clampf(v, -chassis_max_v, chassis_max_v);
     omega = clampf(omega, -chassis_max_omega, chassis_max_omega);
@@ -192,7 +202,8 @@ exit_code_t chassis_init(void)
     assert_fun(param_add("chassis_ol_v_scale", PARAM_TYPE_FLOAT, &chassis_ol_v_scale, true));
     assert_fun(param_add("chassis_ol_w_scale", PARAM_TYPE_FLOAT, &chassis_ol_w_scale, true));
     assert_fun(param_add("chassis_omega_to_wheel", PARAM_TYPE_FLOAT, &chassis_omega_to_wheel, true));
-    assert_fun(param_add("chassis_imu_yaw_sign", PARAM_TYPE_FLOAT, &chassis_imu_yaw_sign, true));
+    /* 符号约定随固件，不落盘，避免旧 Flash 覆盖默认值 */
+    assert_fun(param_add("chassis_imu_yaw_sign", PARAM_TYPE_FLOAT, &chassis_imu_yaw_sign, false));
     assert_fun(param_add("chassis_yaw_rate_kp", PARAM_TYPE_FLOAT, &chassis_yaw_rate_kp, true));
     assert_fun(param_add("chassis_yaw_rate_ki", PARAM_TYPE_FLOAT, &chassis_yaw_rate_ki, true));
     assert_fun(param_add("chassis_heading_kp", PARAM_TYPE_FLOAT, &chassis_heading_kp, true));

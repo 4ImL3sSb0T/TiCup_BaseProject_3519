@@ -42,8 +42,12 @@ extern "C" {
  */
 #define CHASSIS_OMEGA_TO_WHEEL_DEFAULT  (0.15f)
 
-/** IMU 航向/角速度符号：实车反向时改为 -1（本车角速度环实测需取反） */
-#define CHASSIS_IMU_YAW_SIGN_DEFAULT    (-1.0f)
+/**
+ * IMU 航向/角速度符号（乘到 gyro.z / yaw）
+ * 车体正 ω = 逆时针；若闭环方向反了改为 -1
+ * 注意：kinematics 已对执行器 v/ω 取反，默认 +1 与车体一致
+ */
+#define CHASSIS_IMU_YAW_SIGN_DEFAULT    (1.0f)
 
 typedef enum {
     CHASSIS_MODE_IDLE = 0,
