@@ -25,7 +25,6 @@
 #include "service/motion/motor.h"
 #include "service/motion/encoder.h"
 #include "service/motion/chassis.h"
-#include "service/motion/track_follow.h"
 #include "driver/track.h"
 #include "service/imu/imu.h"
 #include "service/gui/gui_app.h"

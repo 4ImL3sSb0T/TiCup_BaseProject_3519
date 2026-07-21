@@ -10,7 +10,6 @@
 #include "param.h"
 #include "service/motion/motor.h"
 #include "service/motion/chassis.h"
-#include "service/motion/track_follow.h"
 #include <string.h>
 #include "service/sys/sys_log.h"
 
@@ -32,7 +31,6 @@ command_t command_list[] = {
     {"load", param_command_parse},
     {"motor", motor_command_handler},
     {"chassis", chassis_command_handler},
-    {"track", track_follow_command_handler},
     {"help", parser_helper_handler},
     {NULL, NULL}  // 结束标志
 };
