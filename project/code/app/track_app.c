@@ -19,7 +19,7 @@
 #define TRACK_APP_DT_S            (0.01f)
 
 /** 与 mission 默认对齐，方便迁参 */
-#define TRACK_APP_V_DEFAULT       (8.0f)
+#define TRACK_APP_V_DEFAULT       (15.0f)
 #define TRACK_APP_KP_DEFAULT      (40.0f)
 #define TRACK_APP_KI_DEFAULT      (0.0f)
 #define TRACK_APP_KD_DEFAULT      (0.0f)
