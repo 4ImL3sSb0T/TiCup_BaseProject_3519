@@ -29,6 +29,7 @@
 #include "service/imu/imu.h"
 #include "service/gui/gui_app.h"
 #include "app/mission.h"
+#include "app/track_app.h"
 #include "bsp/notice/notice.h"
 
 /*
@@ -49,6 +50,7 @@
  *   - 5ms  soft: GUI 按键扫描（gui_app）
  *   - 10ms soft: chassis 外环
  *   - 10ms soft: mission 任务状态机
+ *   - 10ms soft: track_app 循迹调试
  *   - 20ms soft: 命令服务
  *   - 100ms soft: GUI 刷新（gui_app）
  *   - A14: mission 声光（LED+蜂鸣器），非心跳
@@ -60,6 +62,7 @@
 #define MOTION_UPDATE_MS       (2U)
 #define CHASSIS_UPDATE_MS      (10U)
 #define MISSION_UPDATE_MS      (10U)
+#define TRACK_APP_UPDATE_MS    (10U)
 
 /* -------------------------------------------------------------------------- */
 /* 1ms 硬件定时：仅推进系统时间（不跑重逻辑）                                    */
@@ -101,6 +104,13 @@ static void mission_task(const event_t *event, void *user_data)
     (void)event;
     (void)user_data;
     mission_update();
+}
+
+static void track_app_task(const event_t *event, void *user_data)
+{
+    (void)event;
+    (void)user_data;
+    track_app_update();
 }
 
 static soft_timer_id_t app_start_timer(uint32_t period_ms,
@@ -208,6 +218,13 @@ static void app_init(void)
         } else {
             sys_log_text(info, "mission_init ok");
         }
+
+        /* 11c. 循迹调试 app（与 mission 共用 track 驱动；互斥运行） */
+        if (track_app_init() != EXIT_OK) {
+            sys_log_text(error, "track_app_init failed");
+        } else {
+            sys_log_text(info, "track_app_init ok");
+        }
     }
 
     /* 12. 全部 param_add 完成后从 LFS /param.txt 恢复
@@ -238,13 +255,14 @@ static void app_init(void)
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
-    (void)app_start_timer(MISSION_UPDATE_MS, mission_task, "mission");
+    // (void)app_start_timer(MISSION_UPDATE_MS, mission_task, "mission");
+    (void)app_start_timer(TRACK_APP_UPDATE_MS, track_app_task, "track_app");
 
     /* 16. 开全局中断 */
     interrupt_global_enable(0);
 
     sys_log_text(info,
-                 "init done. try: help / chassis status / motor / mission start 1"
+                 "init done. try: help / track start|status / mission start 1"
                  " (UART0); GUI keys A30/A31/B0/B1");
 }
 

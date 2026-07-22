@@ -4,6 +4,7 @@
  */
 #include "app/mission.h"
 
+#include "app/track_app.h"
 #include "bsp/notice/notice.h"
 #include "common/pid/pid.h"
 #include "driver/track.h"
@@ -452,6 +453,10 @@ exit_code_t mission_start(mission_id_t id, uint8_t laps)
         return EXIT_NOT_INITIALIZED;
     }
     if (s_status == MISSION_STATUS_RUNNING) {
+        return EXIT_BUSY;
+    }
+    if (track_app_is_running()) {
+        sys_log_text(warning, "mission: track_app running, stop track first");
         return EXIT_BUSY;
     }
     if (id > MISSION_ID_4) {

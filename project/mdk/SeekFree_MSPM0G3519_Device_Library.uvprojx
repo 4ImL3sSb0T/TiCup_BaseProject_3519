@@ -540,6 +540,16 @@
               <FilePath>..\code\app\mission.h</FilePath>
             </File>
             <File>
+              <FileName>track_app.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\app\track_app.c</FilePath>
+            </File>
+            <File>
+              <FileName>track_app.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\app\track_app.h</FilePath>
+            </File>
+            <File>
               <FileName>notice.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\bsp\notice\notice.c</FilePath>

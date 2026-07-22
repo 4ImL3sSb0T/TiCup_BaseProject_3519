@@ -2,7 +2,7 @@
  * @file track.h
  * @brief 光电循迹驱动层：采样 / 极性归一 / 位掩码 / 加权偏差
  *
- * 仅负责传感器，不含 PID 与底盘控制（见 service/motion/track_follow.*）。
+ * 仅负责传感器，不含 PID 与底盘控制（见 app/track_app.* / app/mission 弧段）。
  *
  * 后端（编译期 TRACK_SENSOR_BACKEND）：
  *   TRACK_BACKEND_DIGITAL5 — 五路独立数字 GPIO

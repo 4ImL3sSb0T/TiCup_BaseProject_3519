@@ -11,6 +11,7 @@
 #include "service/motion/motor.h"
 #include "service/motion/chassis.h"
 #include "app/mission.h"
+#include "app/track_app.h"
 #include <string.h>
 #include "service/sys/sys_log.h"
 
@@ -33,6 +34,7 @@ command_t command_list[] = {
     {"motor", motor_command_handler},
     {"chassis", chassis_command_handler},
     {"mission", mission_command_handler},
+    {"track", track_app_command_handler},
     {"help", parser_helper_handler},
     {NULL, NULL}  // 结束标志
 };
