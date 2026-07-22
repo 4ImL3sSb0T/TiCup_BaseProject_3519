@@ -50,24 +50,24 @@ extern "C" {
 #endif
 
 /* -------------------------------------------------------------------------- */
-/* 五路数字 GPIO 引脚（占位 — 定脚后修改；勿使用 hardware.md 已占用脚）          */
-/* 候选空闲脚示例（仅注释）：B8 B14 B15 B16 A0 A1 A16 A17 B2 B3 B4 B5 …        */
+/* 五路数字 GPIO：左 → 右 CH0..CH4（error 负=偏左）                              */
+/* 已启用占用见 docs/hardware.md；勿占用 B21–B23（IMU SPI1）                    */
 /* -------------------------------------------------------------------------- */
 #if (TRACK_SENSOR_BACKEND == TRACK_BACKEND_DIGITAL5)
 #ifndef TRACK_PIN_0
-#define TRACK_PIN_0             (B8)    /* TODO: 定脚 */
+#define TRACK_PIN_0             (A0)    /* 最左 */
 #endif
 #ifndef TRACK_PIN_1
-#define TRACK_PIN_1             (B14)   /* TODO: 定脚 */
+#define TRACK_PIN_1             (A1)
 #endif
 #ifndef TRACK_PIN_2
-#define TRACK_PIN_2             (B15)   /* TODO: 定脚 */
+#define TRACK_PIN_2             (B14)   /* 中 */
 #endif
 #ifndef TRACK_PIN_3
-#define TRACK_PIN_3             (B16)   /* TODO: 定脚 */
+#define TRACK_PIN_3             (B8)
 #endif
 #ifndef TRACK_PIN_4
-#define TRACK_PIN_4             (B2)    /* TODO: 定脚 */
+#define TRACK_PIN_4             (B18)   /* 最右 */
 #endif
 #endif
 

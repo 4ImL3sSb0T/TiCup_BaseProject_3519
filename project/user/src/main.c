@@ -43,6 +43,7 @@
  *   - 核心板 LED: A14
  *   - IMU: SPI1（B23/B22/B21 + CS B19）
  *   - GUI: IPS200 SPI0（A12/A9/A7/A15/A8/A13）+ 按键 A30/A31/B0/B1
+ *   - 五路循迹: A0/A1/B14/B8/B18（左→右）
  *
  * 多速率任务:
  *   - 1ms  soft: imu_update

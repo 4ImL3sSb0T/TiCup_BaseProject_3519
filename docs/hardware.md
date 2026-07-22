@@ -28,6 +28,7 @@
 | 参数 / LFS | `service/com/param.*`、`service/fs/*`、`bsp/flash` |
 | GUI | `service/gui/gui_app.c`、`MujicaUI_Lite/mjc_input_button.c` |
 | 任务 | `app/mission.*` |
+| 循迹 | `driver/track.*`、`app/track_app.*` |
 | 声光 | `bsp/notice/notice.*`（A14 LED+蜂鸣器） |
 | IMU 库默认 | `libraries/zf_device/zf_device_imu963ra.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
@@ -51,6 +52,7 @@
 | IMU963RA | SPI1 | **B23/B22/B21 + CS B19** | `imu_init` |
 | IPS200 | SPI0 | **A12/A9/A7/A15/A8/A13** | SCK/MOSI/RST/DC/CS/BLK |
 | GUI 按键 | GPIO | **A30/A31/B0/B1** | UP/DOWN/MAIN/AUX |
+| 五路循迹 | GPIO 上拉输入 | **A0/A1/B14/B8/B18** | 左→右 CH0..4；`track` / mission 撞线 |
 | 参数持久化 | DATA Flash + LFS | — | `/param.txt`；非 MAIN `storage` |
 
 - 电机 PWM 频率：`MOTOR_PWM_FREQ_HZ = 17000`
@@ -78,6 +80,7 @@
 
 | 引脚 | 功能 |
 |------|------|
+| A0 / A1 | 循迹 CH0 / CH1（左起） |
 | A7 | IPS200 RST |
 | A8 | IPS200 CS |
 | A9 | IPS200 MOSI（SPI0） |
@@ -90,8 +93,11 @@
 | A26 / A27 | 左编码器 A/B |
 | A30 / A31 / B0 / B1 | GUI 按键 |
 | B7 / B9 | 右编码器 CH1 / CH2 |
+| B8 | 循迹 CH3 |
 | B10 / B11 | 左电机 PWM / DIR |
 | B12 / B13 | 右电机 PWM / DIR |
+| B14 | 循迹 CH2（中） |
+| B18 | 循迹 CH4（最右） |
 | B19 / B21 / B22 / B23 | IMU CS / MISO / MOSI / SCK |
 
 因占用产生的约束（选脚时注意）：
@@ -101,6 +107,8 @@
 | **B7** | 已给右编码器；无线 UART1 RX 同脚，**无线未 init** |
 | **SPI0** | 已给 IPS200；WiFi SPI 同总线，**未启用** |
 | **A14** | 已给 mission 声光；勿再叠 UART3_TX / 心跳翻转 |
+| **B21–B23** | IMU SPI1；循迹勿占 |
+| **A0/A1/B14** | 主板 ToF 丝印同脚；本工程 ToF 未用，给循迹 |
 
 ---
 
@@ -133,6 +141,20 @@
 | IPS200 | `gui_app` → MujicaUI；竖屏 240×320；100 ms 刷新 |
 | 按键 | 上拉、低有效；`mjc_input_button.c` 与 `KEY_LIST` 一致 |
 
+### 4.4 五路数字循迹
+
+| CH | 引脚 | 位置 |
+|----|------|------|
+| 0 | **A0** | 最左 |
+| 1 | **A1** |  |
+| 2 | **B14** | 中 |
+| 3 | **B8** |  |
+| 4 | **B18** | 最右 |
+
+- 源码：`driver/track.*`（GPIO 上拉，默认低电平=赛道）；控制见 `app/track_app` / `app/mission`
+- 命令：`track scan|status|start|stop`；极性 `track pol 0|1`
+- 与 ToF 丝印（A0/A1/B14）冲突：本工程 **未启用 ToF**
+
 ---
 
 ## 5. 软件节拍
@@ -146,6 +168,7 @@ PIT 仅提供 1 ms；业务 soft_timer：
 | 5 ms | GUI 按键 |
 | 10 ms | `chassis_update` |
 | 10 ms | `mission_update`（独立定时器） |
+| 10 ms | `track_app_update`（循迹调试，与 mission 互斥） |
 | 20 ms | `cmd_service_task` |
 | 100 ms | GUI 刷新 |
 
@@ -168,6 +191,7 @@ PIT 仅提供 1 ms；业务 soft_timer：
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-22 | 五路循迹定脚 **A0/A1/B14/B8/B18**（左→右）；`track_app` 10 ms |
 | 2026-07-20 | IMU963RA 硬件 ODR **Acc/Gyro → 6667 Hz**（LSM6DSR 最高档；原 ~52/208 Hz） |
 | 2026-07-20 | UART0 波特率 **921600 → 115200**（高波特率收包不稳） |
 | 2026-07-19 | `motor_init` 提前到 `fs_init` 之前；init 末尾 `motor_stop_all` |
