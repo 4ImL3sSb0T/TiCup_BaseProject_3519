@@ -1,0 +1,605 @@
+/**
+ * @file mission.c
+ * @brief 表驱动 mission：直行 HEADING 撞线；弧 YAW_RATE = 前馈ω + 循迹 PID
+ */
+#include "app/mission.h"
+
+#include "bsp/notice/notice.h"
+#include "common/pid/pid.h"
+#include "driver/track.h"
+#include "service/com/param.h"
+#include "service/imu/imu.h"
+#include "service/motion/chassis.h"
+#include "service/sys/sys_log.h"
+#include "service/sys/sys_time.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+/* -------------------------------------------------------------------------- */
+#define MISSION_DT_S              (0.01f)
+#define MISSION_V_DEFAULT         (8.0f)
+#define MISSION_LINE_STABLE_N     (3u)
+#define MISSION_LINE_ARM_MS       (300u)
+#define MISSION_ARC_MIN_MS        (400u)
+#define MISSION_STRAIGHT_TMO_MS   (20000u)
+#define MISSION_ARC_TMO_MS        (25000u)
+#define MISSION_NOTIFY_MS_DEF     (120u)
+
+/** 弧前馈角速度 (deg/s)，进 YAW_RATE 的 ω 基准 */
+#define MISSION_ARC_RATE_DEFAULT  (40.0f)
+
+/**
+ * YAW_RATE 有效最小 |ω| (deg/s)：死区较大，指令低于此几乎不动
+ * 弧段最终 ω* 钳到至少该幅值（保持符号）
+ */
+#define MISSION_OMEGA_MIN_DEFAULT (40.0f)
+
+/** 循迹 PID：error→ω 修正 (deg/s)，叠加在前馈上 */
+#define MISSION_TRACK_KP_DEFAULT  (40.0f)
+#define MISSION_TRACK_KI_DEFAULT  (0.0f)
+#define MISSION_TRACK_KD_DEFAULT  (0.0f)
+#define MISSION_TRACK_W_MAX       (80.0f)
+
+#define MISSION_HDG_AC            (-38.7f)
+#define MISSION_HDG_BD            (-141.3f)
+
+/* -------------------------------------------------------------------------- */
+typedef enum {
+    ST_NOTIFY = 0,
+    ST_STRAIGHT,
+    ST_ARC,
+    ST_STOP,
+    ST_LAP,
+} step_type_t;
+
+typedef struct {
+    uint8_t  type;
+    float    v;          /* 占位；实际用 mission_v */
+    float    ang;        /* STRAIGHT: 相对 heading；ARC: yaw_delta */
+    int8_t   track_sign; /* ARC: error→ω 符号 */
+    uint16_t ms;         /* NOTIFY / STOP 声光时长 */
+} step_t;
+
+static const step_t s_steps_1[] = {
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, 0.0f, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+};
+
+static const step_t s_steps_2[] = {
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, 0.0f, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      MISSION_V_DEFAULT, -180.0f, 1, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, 180.0f, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+};
+
+static const step_t s_steps_3[] = {
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_AC, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_BD, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+};
+
+static const step_t s_steps_4[] = {
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_AC, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_BD, 0, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
+    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_LAP,      0, 0, 0, 0 },
+    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+};
+
+/* -------------------------------------------------------------------------- */
+static bool s_inited;
+static mission_id_t s_id;
+static mission_status_t s_status;
+
+static const step_t *s_steps;
+static uint8_t s_step_n;
+static uint8_t s_step_i;
+
+static uint8_t s_lap;
+static uint8_t s_laps_total;
+
+static float s_yaw_base;
+static float s_yaw_enter;
+static uint32_t s_phase_ms;
+static uint8_t s_line_stable;
+static bool s_line_armed;
+
+static pid_controller_t s_track_pid;
+
+static float mission_v = MISSION_V_DEFAULT;
+static float mission_arc_rate = MISSION_ARC_RATE_DEFAULT;
+static float mission_omega_min = MISSION_OMEGA_MIN_DEFAULT;
+static float mission_track_kp = MISSION_TRACK_KP_DEFAULT;
+static float mission_track_ki = MISSION_TRACK_KI_DEFAULT;
+static float mission_track_kd = MISSION_TRACK_KD_DEFAULT;
+
+/** 弧上保持有效转速：|w| 钳到 [omega_min, +inf)，符号不变 */
+static float clamp_omega_min(float w)
+{
+    float lo = mission_omega_min;
+
+    if (lo < 0.0f) {
+        lo = 0.0f;
+    }
+    if (w > 0.0f && w < lo) {
+        return lo;
+    }
+    if (w < 0.0f && w > -lo) {
+        return -lo;
+    }
+    /* w==0：按前馈方向给最小转（不应出现在弧段） */
+    if (w == 0.0f && lo > 0.0f) {
+        return lo;
+    }
+    return w;
+}
+
+/* -------------------------------------------------------------------------- */
+static float wrap_deg(float e)
+{
+    while (e > 180.0f) {
+        e -= 360.0f;
+    }
+    while (e <= -180.0f) {
+        e += 360.0f;
+    }
+    return e;
+}
+
+static float read_yaw(void)
+{
+    return imu_get_attitude().z;
+}
+
+static void mission_fail(const char *why)
+{
+    notice_off();
+    chassis_stop();
+    s_status = MISSION_STATUS_FAILED;
+    sys_log_text(error, "mission FAIL: %s (step=%u)", why, (unsigned)s_step_i);
+}
+
+static const step_t *cur_step(void)
+{
+    if (s_steps == NULL || s_step_i >= s_step_n) {
+        return NULL;
+    }
+    return &s_steps[s_step_i];
+}
+
+static void enter_step(void);
+
+static void next_step(void)
+{
+    s_step_i++;
+    if (s_step_i >= s_step_n) {
+        chassis_stop();
+        notice_off();
+        s_status = MISSION_STATUS_COMPLETED;
+        sys_log_text(info, "mission COMPLETED");
+        return;
+    }
+    enter_step();
+}
+
+static void enter_step(void)
+{
+    const step_t *st = cur_step();
+    float sign;
+
+    s_phase_ms = sys_time_get_ms();
+    s_line_stable = 0;
+    s_line_armed = false;
+    pid_reset(&s_track_pid);
+    pid_update_params(&s_track_pid, mission_track_kp, mission_track_ki, mission_track_kd);
+
+    if (st == NULL) {
+        mission_fail("null_step");
+        return;
+    }
+
+    switch ((step_type_t)st->type) {
+        case ST_NOTIFY:
+            chassis_stop();
+            notice_beep(st->ms ? st->ms : MISSION_NOTIFY_MS_DEF);
+            break;
+
+        case ST_STRAIGHT:
+            notice_off();
+            chassis_set_mode(CHASSIS_MODE_HEADING);
+            chassis_set_heading(wrap_deg(s_yaw_base + st->ang));
+            chassis_set_velocity(mission_v, 0.0f);
+            break;
+
+        case ST_ARC:
+            notice_off();
+            s_yaw_enter = read_yaw();
+            sign = (st->ang >= 0.0f) ? 1.0f : -1.0f;
+            chassis_set_mode(CHASSIS_MODE_YAW_RATE);
+            chassis_set_velocity(mission_v,
+                                 clamp_omega_min(sign * mission_arc_rate));
+            break;
+
+        case ST_STOP:
+            chassis_stop();
+            notice_beep(st->ms ? st->ms : MISSION_NOTIFY_MS_DEF);
+            break;
+
+        case ST_LAP:
+            notice_off();
+            chassis_stop();
+            break;
+
+        default:
+            mission_fail("bad_type");
+            break;
+    }
+}
+
+static bool line_hit(void)
+{
+    track_scan();
+    if (track_get_on_count() >= 1u) {
+        if (s_line_stable < 255u) {
+            s_line_stable++;
+        }
+    } else {
+        s_line_stable = 0;
+    }
+    return s_line_stable >= MISSION_LINE_STABLE_N;
+}
+
+static void run_straight(const step_t *st)
+{
+    uint32_t now = sys_time_get_ms();
+    uint32_t elapsed = now - s_phase_ms;
+
+    chassis_set_mode(CHASSIS_MODE_HEADING);
+    chassis_set_heading(wrap_deg(s_yaw_base + st->ang));
+    chassis_set_velocity(mission_v, 0.0f);
+
+    if (elapsed > MISSION_STRAIGHT_TMO_MS) {
+        mission_fail("straight_timeout");
+        return;
+    }
+
+    if (!s_line_armed) {
+        track_scan();
+        if (track_get_on_count() == 0u || elapsed >= MISSION_LINE_ARM_MS) {
+            s_line_armed = true;
+            s_line_stable = 0;
+        }
+        return;
+    }
+
+    if (line_hit()) {
+        next_step();
+    }
+}
+
+/**
+ * 弧：YAW_RATE
+ *   ω* = sign * arc_rate + track_sign * PID(0, error)   [deg/s]
+ * 出弧：|Δyaw| 达 yaw_delta
+ */
+static void run_arc(const step_t *st)
+{
+    uint32_t now = sys_time_get_ms();
+    float yaw_delta = st->ang;
+    float sign = (yaw_delta >= 0.0f) ? 1.0f : -1.0f;
+    float target = (yaw_delta >= 0.0f) ? yaw_delta : -yaw_delta;
+    float corr;
+    float omega;
+    float turned;
+    int8_t tsign = (st->track_sign >= 0) ? 1 : -1;
+
+    if (target < 1.0f) {
+        target = 180.0f;
+    }
+
+    track_scan();
+    corr = pid_calculate(&s_track_pid, 0.0f, track_get_error());
+    /* 前馈 + 循迹修正；再抬到最小有效 |ω|，避免落进 YAW_RATE 死区 */
+    omega = clamp_omega_min(sign * mission_arc_rate + (float)tsign * corr);
+
+    chassis_set_mode(CHASSIS_MODE_YAW_RATE);
+    chassis_set_velocity(mission_v, omega);
+
+    if ((now - s_phase_ms) > MISSION_ARC_TMO_MS) {
+        mission_fail("arc_timeout");
+        return;
+    }
+
+    turned = wrap_deg(read_yaw() - s_yaw_enter);
+    if (sign < 0.0f) {
+        turned = -turned;
+    }
+    if (turned < 0.0f) {
+        turned = 0.0f;
+    }
+
+    if ((now - s_phase_ms) >= MISSION_ARC_MIN_MS && turned >= (target - 5.0f)) {
+        next_step();
+    }
+}
+
+static void run_notify(const step_t *st)
+{
+    uint16_t ms = st->ms ? st->ms : MISSION_NOTIFY_MS_DEF;
+
+    /* beep 由 notice_update 关断；本步用时长推进 */
+    if ((sys_time_get_ms() - s_phase_ms) >= ms) {
+        notice_off();
+        next_step();
+    }
+}
+
+static void run_stop(const step_t *st)
+{
+    uint16_t ms = st->ms ? st->ms : MISSION_NOTIFY_MS_DEF;
+
+    chassis_stop();
+    if ((sys_time_get_ms() - s_phase_ms) >= ms) {
+        notice_off();
+        s_status = MISSION_STATUS_COMPLETED;
+        sys_log_text(info, "mission COMPLETED (stop)");
+    }
+}
+
+static void run_lap(void)
+{
+    if (s_lap < s_laps_total) {
+        s_lap++;
+        sys_log_text(info, "mission lap %u/%u", (unsigned)s_lap, (unsigned)s_laps_total);
+        s_step_i = 1;
+        enter_step();
+    } else {
+        next_step();
+    }
+}
+
+static void select_table(mission_id_t id)
+{
+    switch (id) {
+        case MISSION_ID_1:
+            s_steps = s_steps_1;
+            s_step_n = (uint8_t)(sizeof(s_steps_1) / sizeof(s_steps_1[0]));
+            break;
+        case MISSION_ID_2:
+            s_steps = s_steps_2;
+            s_step_n = (uint8_t)(sizeof(s_steps_2) / sizeof(s_steps_2[0]));
+            break;
+        case MISSION_ID_3:
+            s_steps = s_steps_3;
+            s_step_n = (uint8_t)(sizeof(s_steps_3) / sizeof(s_steps_3[0]));
+            break;
+        case MISSION_ID_4:
+            s_steps = s_steps_4;
+            s_step_n = (uint8_t)(sizeof(s_steps_4) / sizeof(s_steps_4[0]));
+            break;
+        default:
+            s_steps = NULL;
+            s_step_n = 0;
+            break;
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+exit_code_t mission_init(void)
+{
+    exit_code_t nec;
+
+    if (s_inited) {
+        return EXIT_ALREADY_INITIALIZED;
+    }
+
+    nec = notice_init();
+    if (nec != EXIT_OK && nec != EXIT_ALREADY_INITIALIZED) {
+        sys_log_text(error, "mission: notice_init failed");
+        return nec;
+    }
+
+    pid_init(&s_track_pid, mission_track_kp, mission_track_ki, mission_track_kd,
+             MISSION_DT_S, -MISSION_TRACK_W_MAX, MISSION_TRACK_W_MAX);
+    pid_reset(&s_track_pid);
+
+    (void)param_add("mission_v", PARAM_TYPE_FLOAT, &mission_v, true);
+    (void)param_add("mission_arc_rate", PARAM_TYPE_FLOAT, &mission_arc_rate, true);
+    (void)param_add("mission_omega_min", PARAM_TYPE_FLOAT, &mission_omega_min, true);
+    (void)param_add("mission_track_kp", PARAM_TYPE_FLOAT, &mission_track_kp, true);
+    (void)param_add("mission_track_ki", PARAM_TYPE_FLOAT, &mission_track_ki, true);
+    (void)param_add("mission_track_kd", PARAM_TYPE_FLOAT, &mission_track_kd, true);
+
+    {
+        exit_code_t tec = track_init();
+        if (tec != EXIT_OK && tec != EXIT_ALREADY_INITIALIZED) {
+            sys_log_text(warning, "mission: track_init failed (line detect off)");
+        }
+    }
+
+    s_status = MISSION_STATUS_IDLE;
+    s_inited = true;
+    sys_log_text(info, "mission ready (v=%.1f arc_rate=%.1f |w|_min=%.1f)",
+                 mission_v, mission_arc_rate, mission_omega_min);
+    return EXIT_OK;
+}
+
+exit_code_t mission_start(mission_id_t id, uint8_t laps)
+{
+    if (!s_inited) {
+        return EXIT_NOT_INITIALIZED;
+    }
+    if (s_status == MISSION_STATUS_RUNNING) {
+        return EXIT_BUSY;
+    }
+    if (id > MISSION_ID_4) {
+        return EXIT_INVALID_PARAM;
+    }
+
+    select_table(id);
+    if (s_steps == NULL || s_step_n == 0u) {
+        return EXIT_INVALID_PARAM;
+    }
+
+    s_id = id;
+    s_step_i = 0;
+    s_laps_total = (id == MISSION_ID_4) ? ((laps == 0u) ? 4u : laps) : 1u;
+    s_lap = 1;
+    s_yaw_base = read_yaw();
+    s_status = MISSION_STATUS_RUNNING;
+
+    sys_log_text(info, "mission START id=%u laps=%u yaw_base=%.1f",
+                 (unsigned)id + 1u, (unsigned)s_laps_total, s_yaw_base);
+    notice_off();
+    enter_step();
+    return EXIT_OK;
+}
+
+void mission_stop(void)
+{
+    if (!s_inited) {
+        return;
+    }
+    notice_off();
+    chassis_stop();
+    s_status = MISSION_STATUS_ABORTED;
+    sys_log_text(info, "mission ABORTED");
+}
+
+mission_status_t mission_get_status(void)
+{
+    return s_status;
+}
+
+mission_id_t mission_get_id(void)
+{
+    return s_id;
+}
+
+void mission_update(void)
+{
+    const step_t *st;
+
+    notice_update();
+
+    if (!s_inited || s_status != MISSION_STATUS_RUNNING) {
+        return;
+    }
+
+    st = cur_step();
+    if (st == NULL) {
+        mission_fail("no_step");
+        return;
+    }
+
+    switch ((step_type_t)st->type) {
+        case ST_NOTIFY:
+            run_notify(st);
+            break;
+        case ST_STRAIGHT:
+            run_straight(st);
+            break;
+        case ST_ARC:
+            run_arc(st);
+            break;
+        case ST_STOP:
+            run_stop(st);
+            break;
+        case ST_LAP:
+            run_lap();
+            break;
+        default:
+            mission_fail("bad_type");
+            break;
+    }
+}
+
+static const char *status_name(mission_status_t s)
+{
+    switch (s) {
+        case MISSION_STATUS_IDLE:      return "idle";
+        case MISSION_STATUS_RUNNING:   return "running";
+        case MISSION_STATUS_COMPLETED: return "completed";
+        case MISSION_STATUS_FAILED:    return "failed";
+        case MISSION_STATUS_ABORTED:   return "aborted";
+        default:                       return "?";
+    }
+}
+
+cmd_exec_result_t mission_command_handler(i32 seq, int argc, char **argv)
+{
+    const char *cmd;
+    int id_n;
+    int laps;
+
+    (void)seq;
+
+    if (!s_inited) {
+        return CMD_EXEC_CTX(EXIT_NOT_INITIALIZED, "mission_not_init");
+    }
+    if (argc < 2) {
+        sys_log_text(terminal, "Usage: mission start <1-4> [laps]|stop|status");
+        return CMD_EXEC_CTX(EXIT_INVALID_PARAM, "usage");
+    }
+
+    cmd = argv[1];
+
+    if (strcmp(cmd, "stop") == 0) {
+        mission_stop();
+        return CMD_EXEC_CTX(EXIT_OK, "stopped");
+    }
+
+    if (strcmp(cmd, "status") == 0) {
+        sys_log_text(terminal,
+                     "mission: %s id=%u step=%u/%u lap=%u/%u v=%.1f arc=%.1f wmin=%.1f",
+                     status_name(s_status), (unsigned)s_id + 1u,
+                     (unsigned)s_step_i, (unsigned)s_step_n,
+                     (unsigned)s_lap, (unsigned)s_laps_total,
+                     mission_v, mission_arc_rate, mission_omega_min);
+        return CMD_EXEC_CTX(EXIT_OK, "status");
+    }
+
+    if (strcmp(cmd, "start") == 0) {
+        if (argc < 3) {
+            sys_log_text(terminal, "Usage: mission start <1-4> [laps]");
+            return CMD_EXEC_CTX(EXIT_INVALID_PARAM, "usage");
+        }
+        id_n = atoi(argv[2]);
+        laps = (argc >= 4) ? atoi(argv[3]) : 0;
+        if (id_n < 1 || id_n > 4) {
+            return CMD_EXEC_CTX(EXIT_INVALID_PARAM, "id");
+        }
+        {
+            exit_code_t ec = mission_start((mission_id_t)(id_n - 1), (uint8_t)laps);
+            if (ec != EXIT_OK) {
+                return CMD_EXEC_CTX(ec, "start_fail");
+            }
+        }
+        return CMD_EXEC_CTX(EXIT_OK, "started");
+    }
+
+    sys_log_text(terminal, "Usage: mission start <1-4> [laps]|stop|status");
+    return CMD_EXEC_CTX(EXIT_INVALID_PARAM, "usage");
+}

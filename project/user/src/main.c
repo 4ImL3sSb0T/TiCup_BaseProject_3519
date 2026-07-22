@@ -28,6 +28,8 @@
 #include "driver/track.h"
 #include "service/imu/imu.h"
 #include "service/gui/gui_app.h"
+#include "app/mission.h"
+#include "bsp/notice/notice.h"
 
 /*
  * 硬件资源划分 —— 权威文档：docs/hardware.md（改脚前必读并回写）
@@ -46,9 +48,10 @@
  *   - 2ms  soft: encoder + motor
  *   - 5ms  soft: GUI 按键扫描（gui_app）
  *   - 10ms soft: chassis 外环
+ *   - 10ms soft: mission 任务状态机
  *   - 20ms soft: 命令服务
  *   - 100ms soft: GUI 刷新（gui_app）
- *   - 500ms soft: 核心板 LED 心跳（A14）
+ *   - A14: mission 声光（LED+蜂鸣器），非心跳
  */
 
 #define SYS_TICK_PIT            (PIT_TIM_G12)
@@ -56,9 +59,7 @@
 #define IMU_UPDATE_MS          (1U)
 #define MOTION_UPDATE_MS       (2U)
 #define CHASSIS_UPDATE_MS      (10U)
-#define TRACK_FOLLOW_UPDATE_MS (10U)
-#define LED_BLINK_INTERVAL_MS   (500U)
-#define LED_PIN                 (A14)
+#define MISSION_UPDATE_MS      (10U)
 
 /* -------------------------------------------------------------------------- */
 /* 1ms 硬件定时：仅推进系统时间（不跑重逻辑）                                    */
@@ -95,21 +96,11 @@ static void chassis_task(const event_t *event, void *user_data)
     chassis_update();
 }
 
-#if TRACK_ENABLE
-static void track_follow_task(const event_t *event, void *user_data)
+static void mission_task(const event_t *event, void *user_data)
 {
     (void)event;
     (void)user_data;
-    track_follow_update();
-}
-#endif
-
-/* 核心板蓝色 LED 心跳（E01_gpio_demo: A14 翻转） */
-static void led_blink_task(const event_t *event, void *user_data)
-{
-    (void)event;
-    (void)user_data;
-    gpio_toggle_level(LED_PIN);
+    mission_update();
 }
 
 static soft_timer_id_t app_start_timer(uint32_t period_ms,
@@ -188,9 +179,10 @@ static void app_init(void)
     cmd_service_init();
     sys_log_text(info, "cmd_service_init ok (debug UART0 only, wireless off)");
 
-    /* 9. 核心板 LED（A14） */
-    gpio_init(LED_PIN, GPO, 0, GPO_PUSH_PULL);
-    sys_log_text(info, "LED heartbeat on A14");
+    /* 9. 声光 notice（A14）；mission_init 内也会 notice_init，此处尽早置低 */
+    if (notice_init() != EXIT_OK) {
+        sys_log_text(warning, "notice_init skip/fail");
+    }
 
     /* 10. IMU（6 轴，无磁力计）— 仅 init + 注册参数，校准放到 param_load 之后 */
     exit_code_t imu_ret = EXIT_FAIL;
@@ -210,14 +202,12 @@ static void app_init(void)
             chassis_set_imu_ready(imu_ret == EXIT_OK);
         }
 
-#if TRACK_ENABLE
-        /* 11b. 循迹控制（依赖 chassis + driver/track；定脚后置 TRACK_ENABLE=1） */
-        if (track_follow_init() != EXIT_OK) {
-            sys_log_text(error, "track_follow_init failed");
+        /* 11b. mission（内部 track_init；依赖 chassis + imu） */
+        if (mission_init() != EXIT_OK) {
+            sys_log_text(error, "mission_init failed");
         } else {
-            sys_log_text(info, "track_follow_init ok");
+            sys_log_text(info, "mission_init ok");
         }
-#endif
     }
 
     /* 12. 全部 param_add 完成后从 LFS /param.txt 恢复
@@ -248,19 +238,13 @@ static void app_init(void)
     (void)app_start_timer(IMU_UPDATE_MS, imu_task, "imu");
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
-#if TRACK_ENABLE
-    (void)app_start_timer(TRACK_FOLLOW_UPDATE_MS, track_follow_task, "track");
-#endif
-    // (void)app_start_timer(LED_BLINK_INTERVAL_MS, led_blink_task, "led");
+    (void)app_start_timer(MISSION_UPDATE_MS, mission_task, "mission");
 
     /* 16. 开全局中断 */
     interrupt_global_enable(0);
 
     sys_log_text(info,
-                 "init done. try: help / chassis status / motor"
-#if TRACK_ENABLE
-                 " / track status"
-#endif
+                 "init done. try: help / chassis status / motor / mission start 1"
                  " (UART0); GUI keys A30/A31/B0/B1");
 }
 

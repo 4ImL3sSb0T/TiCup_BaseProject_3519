@@ -530,6 +530,26 @@
               <FilePath>..\code\driver\track.h</FilePath>
             </File>
             <File>
+              <FileName>mission.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\app\mission.c</FilePath>
+            </File>
+            <File>
+              <FileName>mission.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\app\mission.h</FilePath>
+            </File>
+            <File>
+              <FileName>notice.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\code\bsp\notice\notice.c</FilePath>
+            </File>
+            <File>
+              <FileName>notice.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\code\bsp\notice\notice.h</FilePath>
+            </File>
+            <File>
               <FileName>imu.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\code\service\imu\imu.c</FilePath>

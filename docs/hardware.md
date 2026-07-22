@@ -27,6 +27,8 @@
 | 日志 | `service/sys/sys_log.*` |
 | 参数 / LFS | `service/com/param.*`、`service/fs/*`、`bsp/flash` |
 | GUI | `service/gui/gui_app.c`、`MujicaUI_Lite/mjc_input_button.c` |
+| 任务 | `app/mission.*` |
+| 声光 | `bsp/notice/notice.*`（A14 LED+蜂鸣器） |
 | IMU 库默认 | `libraries/zf_device/zf_device_imu963ra.h` |
 | 调试串口 | `libraries/zf_common/zf_common_debug.h` |
 
@@ -45,7 +47,7 @@
 | 底盘 | software | — | `chassis_init` + 10 ms `chassis_update` |
 | 系统 1 ms | PIT_TIM_G12 | — | `sys_time_ms` |
 | 命令 + 日志 | UART0 | **A10 TX / A11 RX** | **115200**；`SYS_LOG_UART` |
-| 核心板 LED | GPIO | **A14** | 500 ms 心跳 |
+| 声光提示 | GPIO | **A14** | LED+蜂鸣器；mission 启停/过点 |
 | IMU963RA | SPI1 | **B23/B22/B21 + CS B19** | `imu_init` |
 | IPS200 | SPI0 | **A12/A9/A7/A15/A8/A13** | SCK/MOSI/RST/DC/CS/BLK |
 | GUI 按键 | GPIO | **A30/A31/B0/B1** | UP/DOWN/MAIN/AUX |
@@ -83,7 +85,7 @@
 | A11 | UART0 RX |
 | A12 | IPS200 SCK（SPI0） |
 | A13 | IPS200 BLK |
-| A14 | 核心板 LED |
+| A14 | 声光（LED+蜂鸣器一体，mission 过点/启停） |
 | A15 | IPS200 DC |
 | A26 / A27 | 左编码器 A/B |
 | A30 / A31 / B0 / B1 | GUI 按键 |
@@ -98,7 +100,7 @@
 |------|------|
 | **B7** | 已给右编码器；无线 UART1 RX 同脚，**无线未 init** |
 | **SPI0** | 已给 IPS200；WiFi SPI 同总线，**未启用** |
-| **A14** | 已给 LED；勿再叠 UART3_TX 等业务 |
+| **A14** | 已给 mission 声光；勿再叠 UART3_TX / 心跳翻转 |
 
 ---
 
@@ -143,9 +145,9 @@ PIT 仅提供 1 ms；业务 soft_timer：
 | 2 ms | `encoder_update` + `motor_update` |
 | 5 ms | GUI 按键 |
 | 10 ms | `chassis_update` |
+| 10 ms | `mission_update`（独立定时器） |
 | 20 ms | `cmd_service_task` |
 | 100 ms | GUI 刷新 |
-| 500 ms | LED 心跳 |
 
 主循环：`soft_timer_process()` + `event_process_async()`。
 
