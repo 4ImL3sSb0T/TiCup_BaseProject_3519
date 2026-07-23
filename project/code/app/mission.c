@@ -1,6 +1,6 @@
 /**
  * @file mission.c
- * @brief 表驱动 mission：直行 HEADING 撞线；弧 YAW_RATE = 前馈ω + 循迹 PID
+ * @brief 表驱动 mission：循迹/直行撞线；弧 YAW_RATE = 前馈ω + 循迹 PID
  */
 #include "app/mission.h"
 
@@ -23,6 +23,7 @@
 #define MISSION_LINE_STABLE_N     (3u)
 #define MISSION_LINE_ARM_MS       (300u)
 #define MISSION_ARC_MIN_MS        (400u)
+#define MISSION_TRACK_TMO_MS      (20000u)
 #define MISSION_STRAIGHT_TMO_MS   (20000u)
 #define MISSION_ARC_TMO_MS        (25000u)
 #define MISSION_NOTIFY_MS_DEF     (120u)
@@ -48,6 +49,7 @@
 /* -------------------------------------------------------------------------- */
 typedef enum {
     ST_NOTIFY = 0,
+    ST_TRACK_TO_LOST,
     ST_STRAIGHT,
     ST_ARC,
     ST_STOP,
@@ -58,15 +60,16 @@ typedef struct {
     uint8_t  type;
     float    v;          /* 占位；实际用 mission_v */
     float    ang;        /* STRAIGHT: 相对 heading；ARC: yaw_delta */
-    int8_t   track_sign; /* ARC: error→ω 符号 */
-    uint16_t ms;         /* NOTIFY / STOP 声光时长 */
+    int8_t   track_sign; /* TRACK/ARC: error→ω 符号 */
+    uint16_t ms;         /* NOTIFY/STOP 时长；STRAIGHT 非 0 时为固定撞线屏蔽时间 */
 } step_t;
 
 static const step_t s_steps_1[] = {
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, 0.0f, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,       0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_TRACK_TO_LOST, MISSION_V_DEFAULT, 0.0f, 1, 0 },
+    { ST_STRAIGHT,     MISSION_V_DEFAULT, 0.0f, 0, MISSION_LINE_ARM_MS },
+    { ST_NOTIFY,       0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,         0, 0, 0, MISSION_NOTIFY_MS_DEF },
 };
 
 static const step_t s_steps_2[] = {
@@ -179,7 +182,8 @@ static void mission_fail(const char *why)
     notice_off();
     chassis_stop();
     s_status = MISSION_STATUS_FAILED;
-    sys_log_text(error, "mission FAIL: %s (step=%u)", why, (unsigned)s_step_i);
+    sys_log_text(mission, "status=failed step=%u reason=%s",
+                 (unsigned)s_step_i + 1u, why);
 }
 
 static const step_t *cur_step(void)
@@ -188,6 +192,19 @@ static const step_t *cur_step(void)
         return NULL;
     }
     return &s_steps[s_step_i];
+}
+
+static const char *step_name(step_type_t type)
+{
+    switch (type) {
+        case ST_NOTIFY:        return "notify";
+        case ST_TRACK_TO_LOST: return "track_to_lost";
+        case ST_STRAIGHT:      return "straight";
+        case ST_ARC:           return "arc";
+        case ST_STOP:          return "stop";
+        case ST_LAP:           return "lap";
+        default:               return "unknown";
+    }
 }
 
 static void enter_step(void);
@@ -199,7 +216,7 @@ static void next_step(void)
         chassis_stop();
         notice_off();
         s_status = MISSION_STATUS_COMPLETED;
-        sys_log_text(info, "mission COMPLETED");
+        sys_log_text(mission, "status=completed");
         return;
     }
     enter_step();
@@ -221,6 +238,10 @@ static void enter_step(void)
         return;
     }
 
+    sys_log_text(mission, "step id=%u index=%u/%u type=%s",
+                 (unsigned)s_id + 1u, (unsigned)s_step_i + 1u,
+                 (unsigned)s_step_n, step_name((step_type_t)st->type));
+
     switch ((step_type_t)st->type) {
         case ST_NOTIFY:
             chassis_stop();
@@ -231,6 +252,12 @@ static void enter_step(void)
             notice_off();
             chassis_set_mode(CHASSIS_MODE_HEADING);
             chassis_set_heading(wrap_deg(s_yaw_base + st->ang));
+            chassis_set_velocity(mission_v, 0.0f);
+            break;
+
+        case ST_TRACK_TO_LOST:
+            notice_off();
+            chassis_set_mode(CHASSIS_MODE_YAW_RATE);
             chassis_set_velocity(mission_v, 0.0f);
             break;
 
@@ -272,6 +299,42 @@ static bool line_hit(void)
     return s_line_stable >= MISSION_LINE_STABLE_N;
 }
 
+/** 纯循迹，确认见线后连续丢线 3 帧；切直行时锁定丢线处航向。 */
+static void run_track_to_lost(const step_t *st)
+{
+    uint32_t now = sys_time_get_ms();
+    float corr;
+    float omega;
+    int8_t tsign = (st->track_sign >= 0) ? 1 : -1;
+
+    track_scan();
+
+    if (track_get_on_count() > 0u) {
+        s_line_armed = true;
+        s_line_stable = 0u;
+    } else if (s_line_armed) {
+        if (s_line_stable < 255u) {
+            s_line_stable++;
+        }
+        if (s_line_stable >= MISSION_LINE_STABLE_N) {
+            s_yaw_base = read_yaw();
+            sys_log_text(mission, "event=track_lost yaw=%.1f", s_yaw_base);
+            next_step();
+            return;
+        }
+    }
+
+    if ((now - s_phase_ms) > MISSION_TRACK_TMO_MS) {
+        mission_fail("track_timeout");
+        return;
+    }
+
+    corr = pid_calculate(&s_track_pid, 0.0f, track_get_error());
+    omega = (float)tsign * corr;
+    chassis_set_mode(CHASSIS_MODE_YAW_RATE);
+    chassis_set_velocity(mission_v, omega);
+}
+
 static void run_straight(const step_t *st)
 {
     uint32_t now = sys_time_get_ms();
@@ -288,7 +351,9 @@ static void run_straight(const step_t *st)
 
     if (!s_line_armed) {
         track_scan();
-        if (track_get_on_count() == 0u || elapsed >= MISSION_LINE_ARM_MS) {
+        if ((st->ms != 0u && elapsed >= st->ms) ||
+            (st->ms == 0u &&
+             (track_get_on_count() == 0u || elapsed >= MISSION_LINE_ARM_MS))) {
             s_line_armed = true;
             s_line_stable = 0;
         }
@@ -365,7 +430,7 @@ static void run_stop(const step_t *st)
     if ((sys_time_get_ms() - s_phase_ms) >= ms) {
         notice_off();
         s_status = MISSION_STATUS_COMPLETED;
-        sys_log_text(info, "mission COMPLETED (stop)");
+        sys_log_text(mission, "status=completed step=stop");
     }
 }
 
@@ -373,7 +438,8 @@ static void run_lap(void)
 {
     if (s_lap < s_laps_total) {
         s_lap++;
-        sys_log_text(info, "mission lap %u/%u", (unsigned)s_lap, (unsigned)s_laps_total);
+        sys_log_text(mission, "event=lap lap=%u/%u",
+                     (unsigned)s_lap, (unsigned)s_laps_total);
         s_step_i = 1;
         enter_step();
     } else {
@@ -442,7 +508,7 @@ exit_code_t mission_init(void)
 
     s_status = MISSION_STATUS_IDLE;
     s_inited = true;
-    sys_log_text(info, "mission ready (v=%.1f arc_rate=%.1f |w|_min=%.1f)",
+    sys_log_text(mission, "status=idle v=%.1f arc_rate=%.1f wmin=%.1f",
                  mission_v, mission_arc_rate, mission_omega_min);
     return EXIT_OK;
 }
@@ -475,7 +541,7 @@ exit_code_t mission_start(mission_id_t id, uint8_t laps)
     s_yaw_base = read_yaw();
     s_status = MISSION_STATUS_RUNNING;
 
-    sys_log_text(info, "mission START id=%u laps=%u yaw_base=%.1f",
+    sys_log_text(mission, "status=running id=%u laps=%u yaw_base=%.1f",
                  (unsigned)id + 1u, (unsigned)s_laps_total, s_yaw_base);
     notice_off();
     enter_step();
@@ -490,7 +556,7 @@ void mission_stop(void)
     notice_off();
     chassis_stop();
     s_status = MISSION_STATUS_ABORTED;
-    sys_log_text(info, "mission ABORTED");
+    sys_log_text(mission, "status=aborted");
 }
 
 mission_status_t mission_get_status(void)
@@ -522,6 +588,9 @@ void mission_update(void)
     switch ((step_type_t)st->type) {
         case ST_NOTIFY:
             run_notify(st);
+            break;
+        case ST_TRACK_TO_LOST:
+            run_track_to_lost(st);
             break;
         case ST_STRAIGHT:
             run_straight(st);

@@ -1,6 +1,6 @@
 /**
  * @file mission.h
- * @brief H 题任务状态机：直行 HEADING 撞线 + 弧段 YAW_RATE（前馈 ω + 循迹 PID）
+ * @brief H 题任务状态机：循迹/直行撞线 + 弧段 YAW_RATE（前馈 ω + 循迹 PID）
  *
  * 周期：main 独立 10 ms → mission_update()
  * 声光：bsp/notice（A14）
@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 typedef enum {
-    MISSION_ID_1 = 0, /* A→B 停车 */
+    MISSION_ID_1 = 0, /* 循迹至丢线 → 沿丢线航向直行 → 撞线停车 */
     MISSION_ID_2,     /* A→B→弧BC→C→D→弧DA→A */
     MISSION_ID_3,     /* A→C→弧CB→B→D→弧DA→A */
     MISSION_ID_4,     /* 路径3 × N 圈 */
