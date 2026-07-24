@@ -1,6 +1,6 @@
 /**
  * @file mission.h
- * @brief H 题任务状态机：循迹/直行撞线 + 弧段 YAW_RATE 循迹 PID
+ * @brief H 题任务状态机：路径编排，循迹控制由 track_app 提供
  *
  * 周期：main 独立 10 ms → mission_update()
  * 声光：bsp/notice（A14）

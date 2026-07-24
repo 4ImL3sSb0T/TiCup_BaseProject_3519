@@ -1,14 +1,12 @@
 /**
  * @file mission.c
- * @brief 表驱动 mission：循迹/直行撞线；弧段使用循迹 PID
+ * @brief 表驱动 mission：任务编排与循迹退出条件
  */
 #include "app/mission.h"
 
 #include "app/track_app.h"
 #include "bsp/notice/notice.h"
-#include "common/pid/pid.h"
 #include "driver/track.h"
-#include "service/com/param.h"
 #include "service/imu/imu.h"
 #include "service/motion/chassis.h"
 #include "service/sys/sys_log.h"
@@ -18,8 +16,6 @@
 #include <string.h>
 
 /* -------------------------------------------------------------------------- */
-#define MISSION_DT_S              (0.01f)
-#define MISSION_V_DEFAULT         (8.0f)
 #define MISSION_LINE_STABLE_N     (3u)
 #define MISSION_LINE_ARM_MS       (300u)
 #define MISSION_ARC_MIN_MS        (400u)
@@ -27,12 +23,6 @@
 #define MISSION_STRAIGHT_TMO_MS   (20000u)
 #define MISSION_ARC_TMO_MS        (25000u)
 #define MISSION_NOTIFY_MS_DEF     (120u)
-
-/** 循迹 PID：error→ω 修正 (deg/s) */
-#define MISSION_TRACK_KP_DEFAULT  (40.0f)
-#define MISSION_TRACK_KI_DEFAULT  (0.0f)
-#define MISSION_TRACK_KD_DEFAULT  (0.0f)
-#define MISSION_TRACK_W_MAX       (80.0f)
 
 #define MISSION_HDG_AC            (-38.7f)
 #define MISSION_HDG_BD            (-141.3f)
@@ -49,58 +39,57 @@ typedef enum {
 
 typedef struct {
     uint8_t  type;
-    float    v;          /* 占位；实际用 mission_v */
     float    ang;        /* STRAIGHT: 相对 heading；ARC: yaw_delta */
     int8_t   track_sign; /* TRACK/ARC: error→ω 符号 */
     uint16_t ms;         /* NOTIFY/STOP 时长；STRAIGHT 非 0 时为固定撞线屏蔽时间 */
 } step_t;
 
 static const step_t s_steps_1[] = {
-    { ST_NOTIFY,       0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_TRACK_TO_LOST, MISSION_V_DEFAULT, 0.0f, 1, 0 },
-    { ST_STRAIGHT,     MISSION_V_DEFAULT, 0.0f, 0, MISSION_LINE_ARM_MS },
-    { ST_NOTIFY,       0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STOP,         0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,        0.0f,  0, MISSION_NOTIFY_MS_DEF },
+    { ST_TRACK_TO_LOST, 0.0f,  1, 0 },
+    { ST_STRAIGHT,      0.0f,  0, MISSION_LINE_ARM_MS },
+    { ST_NOTIFY,        0.0f,  0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,          0.0f,  0, MISSION_NOTIFY_MS_DEF },
 };
 
 static const step_t s_steps_2[] = {
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, 0.0f, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      MISSION_V_DEFAULT, -180.0f, 1, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, 180.0f, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,   0.0f,    0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, 0.0f,    0, 0 },
+    { ST_NOTIFY,   0.0f,    0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,     -180.0f,  1, 0 },
+    { ST_NOTIFY,   0.0f,    0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, 180.0f,  0, 0 },
+    { ST_NOTIFY,   0.0f,    0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      180.0f, -1, 0 },
+    { ST_NOTIFY,   0.0f,    0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,     0.0f,    0, MISSION_NOTIFY_MS_DEF },
 };
 
 static const step_t s_steps_3[] = {
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_AC, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_BD, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_HDG_AC, 0, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      180.0f,        -1, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_HDG_BD, 0, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      180.0f,        -1, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,     0.0f,           0, MISSION_NOTIFY_MS_DEF },
 };
 
 static const step_t s_steps_4[] = {
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_AC, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_V_DEFAULT, MISSION_HDG_BD, 0, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      MISSION_V_DEFAULT, 180.0f, -1, 0 },
-    { ST_NOTIFY,   0, 0, 0, MISSION_NOTIFY_MS_DEF },
-    { ST_LAP,      0, 0, 0, 0 },
-    { ST_STOP,     0, 0, 0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_HDG_AC, 0, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      180.0f,        -1, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT, MISSION_HDG_BD, 0, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,      180.0f,        -1, 0 },
+    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_LAP,      0.0f,           0, 0 },
+    { ST_STOP,     0.0f,           0, MISSION_NOTIFY_MS_DEF },
 };
 
 /* -------------------------------------------------------------------------- */
@@ -120,13 +109,6 @@ static float s_yaw_enter;
 static uint32_t s_phase_ms;
 static uint8_t s_line_stable;
 static bool s_line_armed;
-
-static pid_controller_t s_track_pid;
-
-static float mission_v = MISSION_V_DEFAULT;
-static float mission_track_kp = MISSION_TRACK_KP_DEFAULT;
-static float mission_track_ki = MISSION_TRACK_KI_DEFAULT;
-static float mission_track_kd = MISSION_TRACK_KD_DEFAULT;
 
 /* -------------------------------------------------------------------------- */
 static float wrap_deg(float e)
@@ -197,8 +179,7 @@ static void enter_step(void)
     s_phase_ms = sys_time_get_ms();
     s_line_stable = 0;
     s_line_armed = false;
-    pid_reset(&s_track_pid);
-    pid_update_params(&s_track_pid, mission_track_kp, mission_track_ki, mission_track_kd);
+    track_control_reset();
 
     if (st == NULL) {
         mission_fail("null_step");
@@ -219,20 +200,20 @@ static void enter_step(void)
             notice_off();
             chassis_set_mode(CHASSIS_MODE_HEADING);
             chassis_set_heading(wrap_deg(s_yaw_base + st->ang));
-            chassis_set_velocity(mission_v, 0.0f);
+            chassis_set_velocity(track_control_get_velocity(), 0.0f);
             break;
 
         case ST_TRACK_TO_LOST:
             notice_off();
             chassis_set_mode(CHASSIS_MODE_YAW_RATE);
-            chassis_set_velocity(mission_v, 0.0f);
+            chassis_set_velocity(track_control_get_velocity(), 0.0f);
             break;
 
         case ST_ARC:
             notice_off();
             s_yaw_enter = read_yaw();
             chassis_set_mode(CHASSIS_MODE_YAW_RATE);
-            chassis_set_velocity(mission_v, 0.0f);
+            chassis_set_velocity(track_control_get_velocity(), 0.0f);
             break;
 
         case ST_STOP:
@@ -268,11 +249,9 @@ static bool line_hit(void)
 static void run_track_to_lost(const step_t *st)
 {
     uint32_t now = sys_time_get_ms();
-    float corr;
-    float omega;
     int8_t tsign = (st->track_sign >= 0) ? 1 : -1;
 
-    track_scan();
+    track_control_update(tsign);
 
     if (track_get_on_count() > 0u) {
         s_line_armed = true;
@@ -294,10 +273,6 @@ static void run_track_to_lost(const step_t *st)
         return;
     }
 
-    corr = pid_calculate(&s_track_pid, 0.0f, track_get_error());
-    omega = (float)tsign * corr;
-    chassis_set_mode(CHASSIS_MODE_YAW_RATE);
-    chassis_set_velocity(mission_v, omega);
 }
 
 static void run_straight(const step_t *st)
@@ -307,7 +282,7 @@ static void run_straight(const step_t *st)
 
     chassis_set_mode(CHASSIS_MODE_HEADING);
     chassis_set_heading(wrap_deg(s_yaw_base + st->ang));
-    chassis_set_velocity(mission_v, 0.0f);
+    chassis_set_velocity(track_control_get_velocity(), 0.0f);
 
     if (elapsed > MISSION_STRAIGHT_TMO_MS) {
         mission_fail("straight_timeout");
@@ -341,8 +316,6 @@ static void run_arc(const step_t *st)
     float yaw_delta = st->ang;
     float sign = (yaw_delta >= 0.0f) ? 1.0f : -1.0f;
     float target = (yaw_delta >= 0.0f) ? yaw_delta : -yaw_delta;
-    float corr;
-    float omega;
     float turned;
     int8_t tsign = (st->track_sign >= 0) ? 1 : -1;
 
@@ -350,12 +323,7 @@ static void run_arc(const step_t *st)
         target = 180.0f;
     }
 
-    track_scan();
-    corr = pid_calculate(&s_track_pid, 0.0f, track_get_error());
-    omega = (float)tsign * corr;
-
-    chassis_set_mode(CHASSIS_MODE_YAW_RATE);
-    chassis_set_velocity(mission_v, omega);
+    track_control_update(tsign);
 
     if ((now - s_phase_ms) > MISSION_ARC_TMO_MS) {
         mission_fail("arc_timeout");
@@ -441,6 +409,7 @@ static void select_table(mission_id_t id)
 exit_code_t mission_init(void)
 {
     exit_code_t nec;
+    exit_code_t tec;
 
     if (s_inited) {
         return EXIT_ALREADY_INITIALIZED;
@@ -452,25 +421,15 @@ exit_code_t mission_init(void)
         return nec;
     }
 
-    pid_init(&s_track_pid, mission_track_kp, mission_track_ki, mission_track_kd,
-             MISSION_DT_S, -MISSION_TRACK_W_MAX, MISSION_TRACK_W_MAX);
-    pid_reset(&s_track_pid);
-
-    (void)param_add("mission_v", PARAM_TYPE_FLOAT, &mission_v, true);
-    (void)param_add("mission_track_kp", PARAM_TYPE_FLOAT, &mission_track_kp, true);
-    (void)param_add("mission_track_ki", PARAM_TYPE_FLOAT, &mission_track_ki, true);
-    (void)param_add("mission_track_kd", PARAM_TYPE_FLOAT, &mission_track_kd, true);
-
-    {
-        exit_code_t tec = track_init();
-        if (tec != EXIT_OK && tec != EXIT_ALREADY_INITIALIZED) {
-            sys_log_text(warning, "mission: track_init failed (line detect off)");
-        }
+    tec = track_app_init();
+    if (tec != EXIT_OK && tec != EXIT_ALREADY_INITIALIZED) {
+        sys_log_text(error, "mission: track_app_init failed");
+        return tec;
     }
 
     s_status = MISSION_STATUS_IDLE;
     s_inited = true;
-    sys_log_text(mission, "status=idle v=%.1f", mission_v);
+    sys_log_text(mission, "status=idle v=%.1f", track_control_get_velocity());
     return EXIT_OK;
 }
 
@@ -612,7 +571,7 @@ cmd_exec_result_t mission_command_handler(i32 seq, int argc, char **argv)
                      status_name(s_status), (unsigned)s_id + 1u,
                      (unsigned)s_step_i, (unsigned)s_step_n,
                      (unsigned)s_lap, (unsigned)s_laps_total,
-                     mission_v);
+                     track_control_get_velocity());
         return CMD_EXEC_CTX(EXIT_OK, "status");
     }
 

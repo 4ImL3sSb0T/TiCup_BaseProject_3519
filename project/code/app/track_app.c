@@ -1,6 +1,6 @@
 /**
  * @file track_app.c
- * @brief 循迹调试 app：从 mission 弧段抽出的持续循迹闭环
+ * @brief mission 与独立调试共用的循迹闭环
  */
 #include "app/track_app.h"
 
@@ -18,14 +18,12 @@
 /* -------------------------------------------------------------------------- */
 #define TRACK_APP_DT_S            (0.01f)
 
-/** 与 mission 默认对齐，方便迁参 */
-#define TRACK_APP_V_DEFAULT       (15.0f)
+#define TRACK_APP_V_DEFAULT       (8.0f)
 #define TRACK_APP_KP_DEFAULT      (40.0f)
 #define TRACK_APP_KI_DEFAULT      (0.0f)
 #define TRACK_APP_KD_DEFAULT      (0.0f)
 #define TRACK_APP_W_MAX_DEFAULT   (80.0f)
 #define TRACK_APP_W_MIN_DEFAULT   (0.0f)   /* 调试直行循迹一般不需要最小 |ω| */
-#define TRACK_APP_FF_DEFAULT      (0.0f)   /* 弧前馈；0=纯循迹 */
 #define TRACK_APP_SIGN_DEFAULT    (1.0f)   /* error→ω 符号；反了改 -1 */
 
 /* -------------------------------------------------------------------------- */
@@ -43,7 +41,6 @@ static float track_app_ki = TRACK_APP_KI_DEFAULT;
 static float track_app_kd = TRACK_APP_KD_DEFAULT;
 static float track_app_w_max = TRACK_APP_W_MAX_DEFAULT;
 static float track_app_w_min = TRACK_APP_W_MIN_DEFAULT;
-static float track_app_ff = TRACK_APP_FF_DEFAULT;
 static float track_app_sign = TRACK_APP_SIGN_DEFAULT;
 static float track_app_lost_ms = 0.0f; /* param 用 float；0=不超时 */
 
@@ -128,7 +125,6 @@ exit_code_t track_app_init(void)
     (void)param_add("track_app_kd", PARAM_TYPE_FLOAT, &track_app_kd, true);
     (void)param_add("track_app_w_max", PARAM_TYPE_FLOAT, &track_app_w_max, true);
     (void)param_add("track_app_w_min", PARAM_TYPE_FLOAT, &track_app_w_min, true);
-    (void)param_add("track_app_ff", PARAM_TYPE_FLOAT, &track_app_ff, true);
     (void)param_add("track_app_sign", PARAM_TYPE_FLOAT, &track_app_sign, true);
     (void)param_add("track_app_lost_ms", PARAM_TYPE_FLOAT, &track_app_lost_ms, true);
 
@@ -156,8 +152,7 @@ exit_code_t track_app_start(void)
         return EXIT_BUSY;
     }
 
-    apply_pid_params();
-    pid_reset(&s_pid);
+    track_control_reset();
     s_cmd_omega = 0.0f;
     s_was_lost = true;
     s_lost_since_ms = sys_time_get_ms();
@@ -166,9 +161,8 @@ exit_code_t track_app_start(void)
     chassis_set_mode(CHASSIS_MODE_YAW_RATE);
     chassis_set_velocity(track_app_v, 0.0f);
 
-    sys_log_text(info, "track_app START v=%.1f ff=%.1f sign=%.0f",
-                 (double)track_app_v, (double)track_app_ff,
-                 (double)track_app_sign);
+    sys_log_text(info, "track_app START v=%.1f sign=%.0f",
+                 (double)track_app_v, (double)track_app_sign);
     return EXIT_OK;
 }
 
@@ -193,34 +187,58 @@ bool track_app_is_running(void)
     return s_status == TRACK_APP_RUNNING;
 }
 
-void track_app_update(void)
+void track_control_reset(void)
+{
+    if (!s_inited) {
+        return;
+    }
+    apply_pid_params();
+    pid_reset(&s_pid);
+    s_cmd_omega = 0.0f;
+}
+
+void track_control_update(int8_t sign)
 {
     float err;
     float corr;
-    float sign;
     float omega;
-    uint32_t now;
-    uint32_t lost_lim;
 
-    if (!s_inited || s_status != TRACK_APP_RUNNING) {
+    if (!s_inited) {
         return;
     }
 
-    /* 运行中允许热改 PID / 限幅 */
+    /* mission 与调试运行中都允许热改 PID / 限幅。 */
     apply_pid_params();
 
     track_scan();
     err = track_get_error();
 
-    /* 与 mission 弧段相同：corr = PID(0, error)，再乘 track_sign */
     corr = pid_calculate(&s_pid, 0.0f, err);
-    sign = (track_app_sign >= 0.0f) ? 1.0f : -1.0f;
-    omega = track_app_ff + sign * corr;
+    omega = (float)((sign >= 0) ? 1 : -1) * corr;
     omega = clamp_abs_range(omega, track_app_w_min, track_app_w_max);
     s_cmd_omega = omega;
 
     chassis_set_mode(CHASSIS_MODE_YAW_RATE);
     chassis_set_velocity(track_app_v, omega);
+}
+
+float track_control_get_velocity(void)
+{
+    return track_app_v;
+}
+
+void track_app_update(void)
+{
+    uint32_t now;
+    uint32_t lost_lim;
+    int8_t sign;
+
+    if (!s_inited || s_status != TRACK_APP_RUNNING) {
+        return;
+    }
+
+    sign = (track_app_sign >= 0.0f) ? 1 : -1;
+    track_control_update(sign);
 
     now = sys_time_get_ms();
     if (track_is_lost()) {
@@ -281,9 +299,9 @@ cmd_exec_result_t track_app_command_handler(i32 seq, int argc, char **argv)
                      (double)track_get_error(),
                      track_is_lost() ? 1u : 0u);
         sys_log_text(terminal,
-                     "  v=%.1f omega_cmd=%.1f ff=%.1f sign=%.0f",
+                     "  v=%.1f omega_cmd=%.1f sign=%.0f",
                      (double)track_app_v, (double)s_cmd_omega,
-                     (double)track_app_ff, (double)track_app_sign);
+                     (double)track_app_sign);
         sys_log_text(terminal,
                      "  pid kp=%.1f ki=%.1f kd=%.1f wmax=%.1f wmin=%.1f lost_ms=%.0f",
                      (double)track_app_kp, (double)track_app_ki,

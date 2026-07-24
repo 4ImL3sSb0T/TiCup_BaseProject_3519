@@ -213,18 +213,18 @@ static void app_init(void)
             chassis_set_imu_ready(imu_ret == EXIT_OK);
         }
 
-        /* 11b. mission（内部 track_init；依赖 chassis + imu） */
-        if (mission_init() != EXIT_OK) {
-            sys_log_text(error, "mission_init failed");
-        } else {
-            sys_log_text(info, "mission_init ok");
-        }
-
-        /* 11c. 循迹调试 app（与 mission 共用 track 驱动；互斥运行） */
+        /* 11b. 循迹控制器与独立调试入口（mission 共用同一参数和闭环） */
         if (track_app_init() != EXIT_OK) {
             sys_log_text(error, "track_app_init failed");
         } else {
             sys_log_text(info, "track_app_init ok");
+        }
+
+        /* 11c. mission（依赖 chassis + imu + track_app） */
+        if (mission_init() != EXIT_OK) {
+            sys_log_text(error, "mission_init failed");
+        } else {
+            sys_log_text(info, "mission_init ok");
         }
     }
 

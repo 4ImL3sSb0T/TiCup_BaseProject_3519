@@ -1,12 +1,12 @@
 /**
  * @file track_app.h
- * @brief 循迹调试 app：持续 YAW_RATE 循迹，独立用于调参
+ * @brief 循迹控制器与独立调试入口
  *
  * 周期：main 10 ms → track_app_update()
- * 不跑任务状态机，只做「扫线 → PID → 底盘」闭环，便于调参。
+ * mission 与 track 调试共用「扫线 → PID → 底盘」闭环及全部控制参数。
  *
  * 控制：
- *   ω* = track_app_ff + track_app_sign * PID(0, track_error)   [deg/s]
+ *   ω* = sign * PID(0, track_error)   [deg/s]
  *   再钳 |ω| 到 [track_app_w_min, track_app_w_max]
  *   chassis: YAW_RATE + v = track_app_v
  *
@@ -30,6 +30,11 @@ typedef enum {
 
 exit_code_t track_app_init(void);
 void track_app_update(void);
+
+/** mission 与 track 调试共用的循迹闭环。 */
+void track_control_reset(void);
+void track_control_update(int8_t sign);
+float track_control_get_velocity(void);
 
 exit_code_t track_app_start(void);
 void track_app_stop(void);
