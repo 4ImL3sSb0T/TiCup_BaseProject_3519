@@ -30,7 +30,7 @@ static const gpio_pin_enum s_pins[TRACK_CH_NUM] = {
     TRACK_PIN_4,
 };
 /* 整数权重 ×1，归一化除以 |w|_max=2 */
-static const int8_t s_weights[TRACK_CH_NUM] = { -8 -3, 0, 3, 8 };
+static const int8_t s_weights[TRACK_CH_NUM] = { -8, -2, 0, 2, 8 };
 static const float s_w_max = 2.0f;
 #else
 /* 八路：权重 ×2 存整数，实际为 -3.5..+3.5，归一化除以 3.5 */

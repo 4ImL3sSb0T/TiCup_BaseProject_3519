@@ -238,6 +238,10 @@ void chassis_set_mode(chassis_mode_t mode)
         }
     }
 
+    if (s_mode == mode) {
+        return;
+    }
+
     s_mode = mode;
     chassis_reset_pids();
     chassis_apply_param_to_pid();

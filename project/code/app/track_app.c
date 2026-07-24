@@ -218,7 +218,6 @@ void track_control_update(int8_t sign)
     omega = clamp_abs_range(omega, track_app_w_min, track_app_w_max);
     s_cmd_omega = omega;
 
-    chassis_set_mode(CHASSIS_MODE_YAW_RATE);
     chassis_set_velocity(track_app_v, omega);
 }
 
