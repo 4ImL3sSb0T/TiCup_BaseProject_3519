@@ -2,7 +2,7 @@
 name = "baseproject-scripts"
 version = "0.1.0"
 description = "Utility scripts for BaseProject_3519 (map analysis, motor serial tools, host UI)"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "pyserial>=3.5",
     "customtkinter>=5.2",

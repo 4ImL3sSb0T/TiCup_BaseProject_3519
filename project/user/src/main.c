@@ -257,7 +257,7 @@ static void app_init(void)
     (void)app_start_timer(MOTION_UPDATE_MS, motion_task, "motion");
     (void)app_start_timer(CHASSIS_UPDATE_MS, chassis_task, "chassis");
     (void)app_start_timer(MISSION_UPDATE_MS, mission_task, "mission");
-    // (void)app_start_timer(TRACK_APP_UPDATE_MS, track_app_task, "track_app");
+    (void)app_start_timer(TRACK_APP_UPDATE_MS, track_app_task, "track_app");
 
     /* 16. 开全局中断 */
     interrupt_global_enable(0);
