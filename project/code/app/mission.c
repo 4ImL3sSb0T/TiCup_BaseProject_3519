@@ -1,6 +1,6 @@
 /**
  * @file mission.c
- * @brief 表驱动 mission：循迹/直行撞线；弧 YAW_RATE = 前馈ω + 循迹 PID
+ * @brief 表驱动 mission：循迹/直行撞线；弧段使用循迹 PID
  */
 #include "app/mission.h"
 
@@ -28,16 +28,7 @@
 #define MISSION_ARC_TMO_MS        (25000u)
 #define MISSION_NOTIFY_MS_DEF     (120u)
 
-/** 弧前馈角速度 (deg/s)，进 YAW_RATE 的 ω 基准 */
-#define MISSION_ARC_RATE_DEFAULT  (40.0f)
-
-/**
- * YAW_RATE 有效最小 |ω| (deg/s)：死区较大，指令低于此几乎不动
- * 弧段最终 ω* 钳到至少该幅值（保持符号）
- */
-#define MISSION_OMEGA_MIN_DEFAULT (40.0f)
-
-/** 循迹 PID：error→ω 修正 (deg/s)，叠加在前馈上 */
+/** 循迹 PID：error→ω 修正 (deg/s) */
 #define MISSION_TRACK_KP_DEFAULT  (40.0f)
 #define MISSION_TRACK_KI_DEFAULT  (0.0f)
 #define MISSION_TRACK_KD_DEFAULT  (0.0f)
@@ -133,32 +124,9 @@ static bool s_line_armed;
 static pid_controller_t s_track_pid;
 
 static float mission_v = MISSION_V_DEFAULT;
-static float mission_arc_rate = MISSION_ARC_RATE_DEFAULT;
-static float mission_omega_min = MISSION_OMEGA_MIN_DEFAULT;
 static float mission_track_kp = MISSION_TRACK_KP_DEFAULT;
 static float mission_track_ki = MISSION_TRACK_KI_DEFAULT;
 static float mission_track_kd = MISSION_TRACK_KD_DEFAULT;
-
-/** 弧上保持有效转速：|w| 钳到 [omega_min, +inf)，符号不变 */
-static float clamp_omega_min(float w)
-{
-    float lo = mission_omega_min;
-
-    if (lo < 0.0f) {
-        lo = 0.0f;
-    }
-    if (w > 0.0f && w < lo) {
-        return lo;
-    }
-    if (w < 0.0f && w > -lo) {
-        return -lo;
-    }
-    /* w==0：按前馈方向给最小转（不应出现在弧段） */
-    if (w == 0.0f && lo > 0.0f) {
-        return lo;
-    }
-    return w;
-}
 
 /* -------------------------------------------------------------------------- */
 static float wrap_deg(float e)
@@ -225,7 +193,6 @@ static void next_step(void)
 static void enter_step(void)
 {
     const step_t *st = cur_step();
-    float sign;
 
     s_phase_ms = sys_time_get_ms();
     s_line_stable = 0;
@@ -264,10 +231,8 @@ static void enter_step(void)
         case ST_ARC:
             notice_off();
             s_yaw_enter = read_yaw();
-            sign = (st->ang >= 0.0f) ? 1.0f : -1.0f;
             chassis_set_mode(CHASSIS_MODE_YAW_RATE);
-            chassis_set_velocity(mission_v,
-                                 clamp_omega_min(sign * mission_arc_rate));
+            chassis_set_velocity(mission_v, 0.0f);
             break;
 
         case ST_STOP:
@@ -367,7 +332,7 @@ static void run_straight(const step_t *st)
 
 /**
  * 弧：YAW_RATE
- *   ω* = sign * arc_rate + track_sign * PID(0, error)   [deg/s]
+ *   ω* = track_sign * PID(0, error)   [deg/s]
  * 出弧：|Δyaw| 达 yaw_delta
  */
 static void run_arc(const step_t *st)
@@ -387,8 +352,7 @@ static void run_arc(const step_t *st)
 
     track_scan();
     corr = pid_calculate(&s_track_pid, 0.0f, track_get_error());
-    /* 前馈 + 循迹修正；再抬到最小有效 |ω|，避免落进 YAW_RATE 死区 */
-    omega = clamp_omega_min(sign * mission_arc_rate + (float)tsign * corr);
+    omega = (float)tsign * corr;
 
     chassis_set_mode(CHASSIS_MODE_YAW_RATE);
     chassis_set_velocity(mission_v, omega);
@@ -493,8 +457,6 @@ exit_code_t mission_init(void)
     pid_reset(&s_track_pid);
 
     (void)param_add("mission_v", PARAM_TYPE_FLOAT, &mission_v, true);
-    (void)param_add("mission_arc_rate", PARAM_TYPE_FLOAT, &mission_arc_rate, true);
-    (void)param_add("mission_omega_min", PARAM_TYPE_FLOAT, &mission_omega_min, true);
     (void)param_add("mission_track_kp", PARAM_TYPE_FLOAT, &mission_track_kp, true);
     (void)param_add("mission_track_ki", PARAM_TYPE_FLOAT, &mission_track_ki, true);
     (void)param_add("mission_track_kd", PARAM_TYPE_FLOAT, &mission_track_kd, true);
@@ -508,8 +470,7 @@ exit_code_t mission_init(void)
 
     s_status = MISSION_STATUS_IDLE;
     s_inited = true;
-    sys_log_text(mission, "status=idle v=%.1f arc_rate=%.1f wmin=%.1f",
-                 mission_v, mission_arc_rate, mission_omega_min);
+    sys_log_text(mission, "status=idle v=%.1f", mission_v);
     return EXIT_OK;
 }
 
@@ -647,11 +608,11 @@ cmd_exec_result_t mission_command_handler(i32 seq, int argc, char **argv)
 
     if (strcmp(cmd, "status") == 0) {
         sys_log_text(terminal,
-                     "mission: %s id=%u step=%u/%u lap=%u/%u v=%.1f arc=%.1f wmin=%.1f",
+                     "mission: %s id=%u step=%u/%u lap=%u/%u v=%.1f",
                      status_name(s_status), (unsigned)s_id + 1u,
                      (unsigned)s_step_i, (unsigned)s_step_n,
                      (unsigned)s_lap, (unsigned)s_laps_total,
-                     mission_v, mission_arc_rate, mission_omega_min);
+                     mission_v);
         return CMD_EXEC_CTX(EXIT_OK, "status");
     }
 

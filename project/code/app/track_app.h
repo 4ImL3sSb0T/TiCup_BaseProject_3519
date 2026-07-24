@@ -1,6 +1,6 @@
 /**
  * @file track_app.h
- * @brief 循迹调试 app：持续 YAW_RATE 循迹（与 mission 弧段同一套 PID 公式）
+ * @brief 循迹调试 app：持续 YAW_RATE 循迹，独立用于调参
  *
  * 周期：main 10 ms → track_app_update()
  * 不跑任务状态机，只做「扫线 → PID → 底盘」闭环，便于调参。

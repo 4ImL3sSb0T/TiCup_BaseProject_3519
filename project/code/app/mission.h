@@ -1,6 +1,6 @@
 /**
  * @file mission.h
- * @brief H 题任务状态机：循迹/直行撞线 + 弧段 YAW_RATE（前馈 ω + 循迹 PID）
+ * @brief H 题任务状态机：循迹/直行撞线 + 弧段 YAW_RATE 循迹 PID
  *
  * 周期：main 独立 10 ms → mission_update()
  * 声光：bsp/notice（A14）
