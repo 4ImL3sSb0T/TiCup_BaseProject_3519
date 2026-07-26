@@ -12,7 +12,7 @@ from host.config_store import load_config, save_config
 from host.protocol import Ack, strip_log_tag
 from host.serial_client import DEFAULT_BAUD, SerialClient, list_serial_ports
 from host.ui.help_text import HELP_TEXT
-from host.ui.tabs import ConsoleTab, DriveTab, MotorTab, ParamTab
+from host.ui.tabs import ConsoleTab, DriveTab, MotorTab, ParamTab, TrackMissionTab
 from host.ui.widgets import StatusDot
 
 ctk.set_appearance_mode("dark")
@@ -38,7 +38,7 @@ class HostApp(ctk.CTk):
         self._poll_job: Optional[str] = None
         self._ui_job: Optional[str] = None
         self.typing = False
-        self.control_owner = "idle"  # idle | chassis | motor
+        self.control_owner = "idle"  # idle | chassis | motor | track | mission
         self.chassis_mode = "idle"
         # Allow a few status lines through the log after manual status requests.
         self._status_log_budget = 0
@@ -46,6 +46,7 @@ class HostApp(ctk.CTk):
         # Tab panels (assigned in _build_ui).
         self.drive: DriveTab
         self.motor: MotorTab
+        self.track_mission: TrackMissionTab
         self.param: ParamTab
         self.console: ConsoleTab
 
@@ -77,6 +78,7 @@ class HostApp(ctk.CTk):
         self.tabs.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
         tab_drive = self.tabs.add("驾驶")
         tab_motor = self.tabs.add("电机")
+        tab_track = self.tabs.add("循迹/任务")
         tab_param = self.tabs.add("参数")
         tab_console = self.tabs.add("控制台")
         tab_help = self.tabs.add("帮助")
@@ -84,6 +86,7 @@ class HostApp(ctk.CTk):
         # Motor before param: param "应用 motor param" calls motor.motor_param.
         self.drive = DriveTab(self, tab_drive)
         self.motor = MotorTab(self, tab_motor)
+        self.track_mission = TrackMissionTab(self, tab_track)
         self.param = ParamTab(self, tab_param)
         self.console = ConsoleTab(self, tab_console)
         self._build_help_tab(tab_help)
@@ -153,6 +156,7 @@ class HostApp(ctk.CTk):
         widgets = [self.baud_entry]
         widgets.extend(self.drive.text_entries())
         widgets.extend(self.motor.text_entries())
+        widgets.extend(self.track_mission.text_entries())
         widgets.extend(self.param.text_entries())
         widgets.extend(self.console.text_entries())
         for w in widgets:
@@ -277,7 +281,13 @@ class HostApp(ctk.CTk):
         self._update_owner_label()
 
     def _update_owner_label(self) -> None:
-        colors = {"idle": "#95a5a6", "chassis": "#5dade2", "motor": "#f0ad4e"}
+        colors = {
+            "idle": "#95a5a6",
+            "chassis": "#5dade2",
+            "motor": "#f0ad4e",
+            "track": "#58d68d",
+            "mission": "#af7ac5",
+        }
         self.owner_lbl.configure(
             text=f"主控: {self.control_owner}",
             text_color=colors.get(self.control_owner, "#95a5a6"),
@@ -286,6 +296,7 @@ class HostApp(ctk.CTk):
     def emergency_stop(self) -> None:
         self.motor.cancel_jog()
         self.drive.reset_state()
+        self.set_control_owner("idle")
         if not self.client.is_open:
             self.log("急停：未连接", "error")
             return
@@ -351,6 +362,27 @@ class HostApp(ctk.CTk):
 
         while True:
             try:
+                tr = self.client.track_queue.get_nowait()
+            except Exception:
+                break
+            self.track_mission.handle_track(tr)
+
+        while True:
+            try:
+                td = self.client.track_detail_queue.get_nowait()
+            except Exception:
+                break
+            self.track_mission.handle_track_detail(td)
+
+        while True:
+            try:
+                mi = self.client.mission_queue.get_nowait()
+            except Exception:
+                break
+            self.track_mission.handle_mission(mi)
+
+        while True:
+            try:
                 err = self.client.error_queue.get_nowait()
             except Exception:
                 break
@@ -364,7 +396,14 @@ class HostApp(ctk.CTk):
 
         self.param.feed_rx_line(line)
 
-        is_status = "chassis:" in line or "Left:" in line or "Right:" in line
+        is_status = (
+            "chassis:" in line
+            or "Left:" in line
+            or "Right:" in line
+            or line.lstrip().startswith("track:")
+            or "{terminal}track:" in line
+            or "mission:" in line
+        )
         if self.poll_var.get() and is_status:
             if self._status_log_budget > 0:
                 self._status_log_budget -= 1

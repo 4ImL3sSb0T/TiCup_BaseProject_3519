@@ -27,6 +27,26 @@ _RE_MOTOR = re.compile(
     r"mode=(\w+)\s+dz=([-\d.]+)"
 )
 
+# track: run mask=0x1F on=5 err=0.000 lost=0
+_RE_TRACK = re.compile(
+    r"track:\s*(\w+)\s+mask=(0x[0-9A-Fa-f]+|\d+)\s+on=(\d+)\s+"
+    r"err=([-\d.]+)\s+lost=(\d+)"
+)
+#   v=8.0 omega_cmd=12.3 sign=1
+_RE_TRACK_V = re.compile(
+    r"v=([-\d.]+)\s+omega_cmd=([-\d.]+)\s+sign=([-\d.]+)"
+)
+#   backend=gpio5 pol=0 ch=5
+_RE_TRACK_BACKEND = re.compile(
+    r"backend=(\S+)\s+pol=(\d+)\s+ch=(\d+)"
+)
+
+# mission: running id=1 step=2/5 lap=1/4 v=8.0
+_RE_MISSION = re.compile(
+    r"mission:\s*(\w+)\s+id=(\d+)\s+step=(\d+)/(\d+)\s+"
+    r"lap=(\d+)/(\d+)\s+v=([-\d.]+)"
+)
+
 _RE_TAG = re.compile(r"^\{([a-zA-Z0-9_]+)\}(.*)$")
 
 # show row: motor_kp             FLOAT      120.000000
@@ -89,6 +109,40 @@ class MotorStatus:
     tgt_pwm: float
     mode: str
     dz: float
+
+
+@dataclass(frozen=True)
+class TrackStatus:
+    """Primary line from `track status`."""
+
+    state: str  # run | idle
+    mask: int
+    on: int
+    err: float
+    lost: int
+
+
+@dataclass(frozen=True)
+class TrackDetail:
+    """Secondary lines from `track status` (v/omega or backend)."""
+
+    v: Optional[float] = None
+    omega_cmd: Optional[float] = None
+    sign: Optional[float] = None
+    backend: Optional[str] = None
+    pol: Optional[int] = None
+    ch: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class MissionStatus:
+    state: str  # idle | running | completed | failed | aborted
+    mission_id: int
+    step: int
+    step_n: int
+    lap: int
+    laps_total: int
+    v: float
 
 
 @dataclass(frozen=True)
@@ -159,6 +213,55 @@ def parse_motor_status(line: str) -> Optional[MotorStatus]:
         tgt_pwm=float(m.group(5)),
         mode=m.group(6),
         dz=float(m.group(7)),
+    )
+
+
+def parse_track_status(line: str) -> Optional[TrackStatus]:
+    text = _line_body(line)
+    m = _RE_TRACK.search(text) or _RE_TRACK.search(line)
+    if not m:
+        return None
+    mask_s = m.group(2)
+    mask = int(mask_s, 0) if mask_s.lower().startswith("0x") else int(mask_s)
+    return TrackStatus(
+        state=m.group(1),
+        mask=mask,
+        on=int(m.group(3)),
+        err=float(m.group(4)),
+        lost=int(m.group(5)),
+    )
+
+
+def parse_track_detail(line: str) -> Optional[TrackDetail]:
+    """Parse v/omega or backend sub-lines of track status (partial fields OK)."""
+    text = _line_body(line)
+    mv = _RE_TRACK_V.search(text) or _RE_TRACK_V.search(line)
+    mb = _RE_TRACK_BACKEND.search(text) or _RE_TRACK_BACKEND.search(line)
+    if not mv and not mb:
+        return None
+    return TrackDetail(
+        v=float(mv.group(1)) if mv else None,
+        omega_cmd=float(mv.group(2)) if mv else None,
+        sign=float(mv.group(3)) if mv else None,
+        backend=mb.group(1) if mb else None,
+        pol=int(mb.group(2)) if mb else None,
+        ch=int(mb.group(3)) if mb else None,
+    )
+
+
+def parse_mission_status(line: str) -> Optional[MissionStatus]:
+    text = _line_body(line)
+    m = _RE_MISSION.search(text) or _RE_MISSION.search(line)
+    if not m:
+        return None
+    return MissionStatus(
+        state=m.group(1),
+        mission_id=int(m.group(2)),
+        step=int(m.group(3)),
+        step_n=int(m.group(4)),
+        lap=int(m.group(5)),
+        laps_total=int(m.group(6)),
+        v=float(m.group(7)),
     )
 
 
@@ -260,6 +363,23 @@ def self_check() -> None:
         "{terminal}Right: pos=10 spd=1.50 tgt_spd=8.00 tgt_pwm=0 mode=speed dz=0"
     )
     assert m is not None and m.name == "Right" and m.spd == 1.5
+
+    tr = parse_track_status(
+        "{terminal}track: run mask=0x1F on=5 err=-0.125 lost=0"
+    )
+    assert tr is not None and tr.state == "run" and tr.mask == 0x1F and tr.on == 5
+    assert abs(tr.err + 0.125) < 1e-6 and tr.lost == 0
+    td = parse_track_detail("{terminal}  v=8.0 omega_cmd=12.5 sign=-1")
+    assert td is not None and td.v == 8.0 and td.omega_cmd == 12.5 and td.sign == -1.0
+    tb = parse_track_detail("{terminal}  backend=gpio5 pol=0 ch=5")
+    assert tb is not None and tb.backend == "gpio5" and tb.pol == 0 and tb.ch == 5
+
+    mi = parse_mission_status(
+        "{terminal}mission: running id=4 step=2/11 lap=1/4 v=6.0"
+    )
+    assert mi is not None and mi.state == "running" and mi.mission_id == 4
+    assert mi.step == 2 and mi.step_n == 11 and mi.lap == 1 and mi.laps_total == 4
+    assert mi.v == 6.0
 
     tag, body = strip_log_tag("{info}hello")
     assert tag == "info" and body == "hello"

@@ -13,10 +13,16 @@ from serial.tools import list_ports
 from host.protocol import (
     Ack,
     ChassisStatus,
+    MissionStatus,
     MotorStatus,
+    TrackDetail,
+    TrackStatus,
     parse_ack,
     parse_chassis_status,
+    parse_mission_status,
     parse_motor_status,
+    parse_track_detail,
+    parse_track_status,
 )
 
 DEFAULT_BAUD = 115200
@@ -44,6 +50,9 @@ class SerialClient:
         self.ack_queue: queue.Queue[Ack] = queue.Queue(maxsize=500)
         self.chassis_queue: queue.Queue[ChassisStatus] = queue.Queue(maxsize=200)
         self.motor_queue: queue.Queue[MotorStatus] = queue.Queue(maxsize=200)
+        self.track_queue: queue.Queue[TrackStatus] = queue.Queue(maxsize=200)
+        self.track_detail_queue: queue.Queue[TrackDetail] = queue.Queue(maxsize=200)
+        self.mission_queue: queue.Queue[MissionStatus] = queue.Queue(maxsize=200)
         self.error_queue: queue.Queue[str] = queue.Queue(maxsize=50)
 
         self._ack_events: dict[int, threading.Event] = {}
@@ -188,6 +197,18 @@ class SerialClient:
         m = parse_motor_status(line)
         if m is not None:
             self._put(self.motor_queue, m)
+
+        tr = parse_track_status(line)
+        if tr is not None:
+            self._put(self.track_queue, tr)
+
+        td = parse_track_detail(line)
+        if td is not None:
+            self._put(self.track_detail_queue, td)
+
+        mi = parse_mission_status(line)
+        if mi is not None:
+            self._put(self.mission_queue, mi)
 
     def _rx_loop(self) -> None:
         buf = bytearray()

@@ -32,7 +32,7 @@ python scripts/host/main.py
 python scripts/host/main.py --port COM8
 ```
 
-UI 结构（`host/ui/`）：`app.py` 壳 + 连接/分发；`tabs/` 驾驶·电机·参数·控制台；`plot.py` 遥测曲线。
+UI 结构（`host/ui/`）：`app.py` 壳 + 连接/分发；`tabs/` 驾驶·电机·循迹/任务·参数·控制台；`plot.py` 遥测曲线。
 
 上次使用的 COM 口保存在 `host/host_config.json`（已 gitignore）。
 
@@ -64,25 +64,33 @@ UI 结构（`host/ui/`）：`app.py` 壳 + 连接/分发；`tabs/` 驾驶·电�
    - 或用预设：停 / 慢 / 中 / 左转 / 右转  
    - **WASD** 遥控；**空格** 急停  
 
-4. **改参**（「参数」Tab）  
+4. **循迹 / 任务**（「循迹/任务」Tab）  
+   - `track scan` → `status` 看 mask/on/err  
+   - `pol` → 调小 `track_app_v` → `start`；方向反了改 `sign=-1`  
+   - 跟稳后 `stop`，再 `mission start 1`…`4`（任务 4 可设 laps）  
+   - **track 与 mission 互斥**；线速度共用 `track_app_v`  
+
+5. **改参**（「参数」Tab）  
    - 连接后自动从板端 `show` 拉取参数表（右侧列表，可「刷新」）  
    - 点参数行填入名/值；`set` 只改 RAM  
    - 电机：`set motor_kp …` → **应用 motor param**  
    - 底盘：`set chassis_* …` → **应用 chassis param**  
+   - 循迹：`set track_app_*`（下一控制周期生效，无需 param 应用）  
    - 持久化：`save`；重载：`load`  
 
-### chassis vs motor
+### 控制权分工
 
 | 场景 | 用哪个 |
 |------|--------|
 | 调单轮、扫 PID | **电机** Tab |
 | 整车差速行驶 | **驾驶** Tab |
+| 光电循迹 / 赛题任务 | **循迹/任务** Tab |
 
-两者会控制同一套电机：进电机操作时若底盘非 idle，上位机会先 `chassis stop`；跑车时不要再 motor set。
+会抢同一套电机与底盘：进电机操作时若底盘非 idle，上位机会先 `chassis stop`；跑 track/mission 时不要再 motor/chassis set。
 
 ### 安全
 
-- 顶栏 **急停 STOP** / 键盘 **空格**：`chassis stop` + `motor 0x3 stop`
+- 顶栏 **急停 STOP** / 键盘 **空格**：`mission stop` → `track stop` → `chassis stop` → `motor 0x3 stop`
 - 断开或关窗：尽力停车
 - 开环勿长期堵转；速度从小到大
 - 输入框聚焦时禁用 WASD

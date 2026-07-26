@@ -87,6 +87,52 @@ def help_cmd() -> str:
     return "help"
 
 
+# --- track (app/track_app) -------------------------------------------------
+
+def track_start() -> str:
+    return "track start"
+
+
+def track_stop() -> str:
+    return "track stop"
+
+
+def track_status() -> str:
+    return "track status"
+
+
+def track_scan() -> str:
+    return "track scan"
+
+
+def track_pol(polarity: int) -> str:
+    """polarity: 0 = black line / dig low; 1 = inverted."""
+    return f"track pol {int(polarity) & 1}"
+
+
+def track_cal(kind: str) -> str:
+    """kind: max | min (GS08 only)."""
+    return f"track cal {kind}"
+
+
+# --- mission (app/mission) -------------------------------------------------
+
+def mission_start(mission_id: int, laps: int | None = None) -> str:
+    """mission_id: 1..4; laps only used for mission 4 (omit/0 → firmware default)."""
+    mid = int(mission_id)
+    if laps is None:
+        return f"mission start {mid}"
+    return f"mission start {mid} {int(laps)}"
+
+
+def mission_stop() -> str:
+    return "mission stop"
+
+
+def mission_status() -> str:
+    return "mission status"
+
+
 def emergency_stop_cmds() -> list[str]:
-    """Prefer chassis stop first, then force both motors off."""
-    return [chassis_stop(), motor_stop(0x3)]
+    """Stop mission/track first, then chassis + both motors."""
+    return [mission_stop(), track_stop(), chassis_stop(), motor_stop(0x3)]
