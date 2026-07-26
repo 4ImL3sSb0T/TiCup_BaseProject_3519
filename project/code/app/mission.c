@@ -245,7 +245,7 @@ static bool line_hit(void)
     return s_line_stable >= MISSION_LINE_STABLE_N;
 }
 
-/** 纯循迹，确认见线后连续丢线 3 帧；切直行时锁定丢线处航向。 */
+/** 纯循迹，确认见线后连续丢线 3 帧；切直行用 start 时的 yaw_base。 */
 static void run_track_to_lost(const step_t *st)
 {
     uint32_t now = sys_time_get_ms();
@@ -261,8 +261,7 @@ static void run_track_to_lost(const step_t *st)
             s_line_stable++;
         }
         if (s_line_stable >= MISSION_LINE_STABLE_N) {
-            s_yaw_base = read_yaw();
-            sys_log_text(mission, "event=track_lost yaw=%.1f", s_yaw_base);
+            sys_log_text(mission, "event=track_lost yaw_base=%.1f", s_yaw_base);
             next_step();
             return;
         }
