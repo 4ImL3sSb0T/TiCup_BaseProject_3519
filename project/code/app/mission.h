@@ -16,9 +16,9 @@ extern "C" {
 #endif
 
 typedef enum {
-    MISSION_ID_1 = 0, /* 循迹至丢线 → 沿丢线航向直行 → 撞线停车 */
+    MISSION_ID_1 = 0, /* 循迹至丢线 → 沿 start 航向直行 → 撞线停车 */
     MISSION_ID_2,     /* A→B→弧BC→C→D→弧DA→A */
-    MISSION_ID_3,     /* A→C→弧CB→B→D→弧DA→A */
+    MISSION_ID_3,     /* A→C→弧CB→B→D → 恢复角度 → 循迹 → A */
     MISSION_ID_4,     /* 路径3 × N 圈 */
 } mission_id_t;
 
