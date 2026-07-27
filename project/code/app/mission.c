@@ -22,6 +22,10 @@
 #define MISSION_TRACK_TMO_MS      (20000u)
 #define MISSION_STRAIGHT_TMO_MS   (20000u)
 #define MISSION_ARC_TMO_MS        (25000u)
+#define MISSION_ALIGN_TMO_MS      (10000u)
+#define MISSION_ALIGN_MIN_MS      (100u)
+#define MISSION_ALIGN_TOL_DEG     (5.0f)
+#define MISSION_ALIGN_STABLE_N    (3u)
 #define MISSION_NOTIFY_MS_DEF     (120u)
 
 #define MISSION_HDG_AC            (-38.7f)
@@ -32,6 +36,7 @@ typedef enum {
     ST_NOTIFY = 0,
     ST_TRACK_TO_LOST,
     ST_STRAIGHT,
+    ST_ALIGN,        /* 原地对齐到 yaw_base+ang */
     ST_ARC,
     ST_STOP,
     ST_LAP,
@@ -39,7 +44,7 @@ typedef enum {
 
 typedef struct {
     uint8_t  type;
-    float    ang;        /* STRAIGHT: 相对 heading；ARC: yaw_delta */
+    float    ang;        /* STRAIGHT/ALIGN: 相对 heading；ARC: yaw_delta */
     int8_t   track_sign; /* TRACK/ARC: error→ω 符号 */
     uint16_t ms;         /* NOTIFY/STOP 时长；STRAIGHT 非 0 时为固定撞线屏蔽时间 */
 } step_t;
@@ -65,31 +70,35 @@ static const step_t s_steps_2[] = {
     { ST_STOP,     0.0f,    0, MISSION_NOTIFY_MS_DEF },
 };
 
+/* A→C → 弧CB → B→D(-141.3) 撞线 → 恢复角度(yaw_base) → 循迹至丢线 → 停 */
 static const step_t s_steps_3[] = {
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_HDG_AC, 0, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      180.0f,        -1, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_HDG_BD, 0, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      180.0f,        -1, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_STOP,     0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT,      MISSION_HDG_AC, 0, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,           180.0f,        -1, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT,      MISSION_HDG_BD, 0, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ALIGN,         0.0f,           0, 0 },
+    { ST_TRACK_TO_LOST, 0.0f,          -1, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STOP,          0.0f,           0, MISSION_NOTIFY_MS_DEF },
 };
 
+/* 同任务3路径 × N 圈 */
 static const step_t s_steps_4[] = {
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_HDG_AC, 0, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      180.0f,        -1, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_STRAIGHT, MISSION_HDG_BD, 0, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_ARC,      180.0f,        -1, 0 },
-    { ST_NOTIFY,   0.0f,           0, MISSION_NOTIFY_MS_DEF },
-    { ST_LAP,      0.0f,           0, 0 },
-    { ST_STOP,     0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT,      MISSION_HDG_AC, 0, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ARC,           180.0f,        -1, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_STRAIGHT,      MISSION_HDG_BD, 0, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_ALIGN,         0.0f,           0, 0 },
+    { ST_TRACK_TO_LOST, 0.0f,          -1, 0 },
+    { ST_NOTIFY,        0.0f,           0, MISSION_NOTIFY_MS_DEF },
+    { ST_LAP,           0.0f,           0, 0 },
+    { ST_STOP,          0.0f,           0, MISSION_NOTIFY_MS_DEF },
 };
 
 /* -------------------------------------------------------------------------- */
@@ -150,6 +159,7 @@ static const char *step_name(step_type_t type)
         case ST_NOTIFY:        return "notify";
         case ST_TRACK_TO_LOST: return "track_to_lost";
         case ST_STRAIGHT:      return "straight";
+        case ST_ALIGN:         return "align";
         case ST_ARC:           return "arc";
         case ST_STOP:          return "stop";
         case ST_LAP:           return "lap";
@@ -203,6 +213,14 @@ static void enter_step(void)
             chassis_set_velocity(track_control_get_velocity(), 0.0f);
             break;
 
+        case ST_ALIGN:
+            /* 原地转到 yaw_base+ang，供撞线后恢复航向再循迹 */
+            notice_off();
+            chassis_set_mode(CHASSIS_MODE_HEADING);
+            chassis_set_heading(wrap_deg(s_yaw_base + st->ang));
+            chassis_set_velocity(0.0f, 0.0f);
+            break;
+
         case ST_TRACK_TO_LOST:
             notice_off();
             chassis_set_mode(CHASSIS_MODE_YAW_RATE);
@@ -245,7 +263,7 @@ static bool line_hit(void)
     return s_line_stable >= MISSION_LINE_STABLE_N;
 }
 
-/** 纯循迹，确认见线后连续丢线 3 帧；切直行时锁定丢线处航向。 */
+/** 纯循迹，确认见线后连续丢线 3 帧；切直行用 start 时的 yaw_base。 */
 static void run_track_to_lost(const step_t *st)
 {
     uint32_t now = sys_time_get_ms();
@@ -261,8 +279,7 @@ static void run_track_to_lost(const step_t *st)
             s_line_stable++;
         }
         if (s_line_stable >= MISSION_LINE_STABLE_N) {
-            s_yaw_base = read_yaw();
-            sys_log_text(mission, "event=track_lost yaw=%.1f", s_yaw_base);
+            sys_log_text(mission, "event=track_lost yaw_base=%.1f", s_yaw_base);
             next_step();
             return;
         }
@@ -301,6 +318,44 @@ static void run_straight(const step_t *st)
     }
 
     if (line_hit()) {
+        next_step();
+    }
+}
+
+/** 原地对齐到 yaw_base+ang，航向误差连续稳定后进入下一步。 */
+static void run_align(const step_t *st)
+{
+    uint32_t now = sys_time_get_ms();
+    uint32_t elapsed = now - s_phase_ms;
+    float target = wrap_deg(s_yaw_base + st->ang);
+    float err;
+
+    chassis_set_mode(CHASSIS_MODE_HEADING);
+    chassis_set_heading(target);
+    chassis_set_velocity(0.0f, 0.0f);
+
+    if (elapsed > MISSION_ALIGN_TMO_MS) {
+        mission_fail("align_timeout");
+        return;
+    }
+
+    err = wrap_deg(target - read_yaw());
+    if (err < 0.0f) {
+        err = -err;
+    }
+
+    if (err <= MISSION_ALIGN_TOL_DEG) {
+        if (s_line_stable < 255u) {
+            s_line_stable++;
+        }
+    } else {
+        s_line_stable = 0;
+    }
+
+    if (elapsed >= MISSION_ALIGN_MIN_MS &&
+        s_line_stable >= MISSION_ALIGN_STABLE_N) {
+        sys_log_text(mission, "event=align_ok tgt=%.1f yaw=%.1f",
+                     target, read_yaw());
         next_step();
     }
 }
@@ -514,6 +569,9 @@ void mission_update(void)
             break;
         case ST_STRAIGHT:
             run_straight(st);
+            break;
+        case ST_ALIGN:
+            run_align(st);
             break;
         case ST_ARC:
             run_arc(st);
