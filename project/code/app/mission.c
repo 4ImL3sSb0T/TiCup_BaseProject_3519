@@ -18,7 +18,10 @@
 /* -------------------------------------------------------------------------- */
 #define MISSION_LINE_STABLE_N     (3u)
 #define MISSION_LINE_ARM_MS       (300u)
-#define MISSION_ARC_MIN_MS        (400u)
+/* 弧起步屏蔽：进弧后至少这么久才允许“丢线出弧”，避免 C 点十字抖丢 */
+#define MISSION_ARC_MIN_MS        (500u)
+/* 弧出弧：连续丢线帧数（mission 约 10ms/拍 → 约 100ms） */
+#define MISSION_ARC_LOST_N        (10u)
 #define MISSION_TRACK_TMO_MS      (20000u)
 #define MISSION_STRAIGHT_TMO_MS   (20000u)
 #define MISSION_ARC_TMO_MS        (25000u)
@@ -44,9 +47,10 @@ typedef enum {
 
 typedef struct {
     uint8_t  type;
-    float    ang;        /* STRAIGHT/ALIGN: 相对 heading；ARC: yaw_delta */
+    float    ang;        /* STRAIGHT/ALIGN: 相对 heading；ARC: 保留(出弧不看 yaw) */
     int8_t   track_sign; /* TRACK/ARC: error→ω 符号 */
-    uint16_t ms;         /* NOTIFY/STOP 时长；STRAIGHT 非 0 时为固定撞线屏蔽时间 */
+    uint16_t ms;         /* NOTIFY/STOP 时长；STRAIGHT 非 0 时固定撞线屏蔽；
+                          * ARC 非 0 时覆盖起步屏蔽(ms)，默认 MISSION_ARC_MIN_MS */
 } step_t;
 
 static const step_t s_steps_1[] = {
@@ -116,7 +120,6 @@ static uint8_t s_lap;
 static uint8_t s_laps_total;
 
 static float s_yaw_base;
-static float s_yaw_enter;
 static uint32_t s_phase_ms;
 static uint8_t s_line_stable;
 static bool s_line_armed;
@@ -231,7 +234,6 @@ static void enter_step(void)
 
         case ST_ARC:
             notice_off();
-            s_yaw_enter = read_yaw();
             chassis_set_mode(CHASSIS_MODE_YAW_RATE);
             chassis_set_velocity(track_control_get_velocity(), 0.0f);
             break;
@@ -363,39 +365,43 @@ static void run_align(const step_t *st)
 }
 
 /**
- * 弧：YAW_RATE
+ * 弧：YAW_RATE 循迹
  *   ω* = track_sign * PID(0, error)   [deg/s]
- * 出弧：|Δyaw| 达 yaw_delta
+ * 出弧：先见线 arm，再连续丢线 MISSION_ARC_LOST_N 帧
+ * 起步屏蔽：elapsed < min_ms 时丢线不计（默认 MISSION_ARC_MIN_MS，表项 ms 可覆盖）
  */
 static void run_arc(const step_t *st)
 {
     uint32_t now = sys_time_get_ms();
-    float yaw_delta = st->ang;
-    float sign = (yaw_delta >= 0.0f) ? 1.0f : -1.0f;
-    float target = (yaw_delta >= 0.0f) ? yaw_delta : -yaw_delta;
-    float turned;
+    uint32_t elapsed = now - s_phase_ms;
+    uint32_t min_ms = (st->ms != 0u) ? (uint32_t)st->ms : MISSION_ARC_MIN_MS;
     int8_t tsign = (st->track_sign >= 0) ? 1 : -1;
 
-    if (target < 1.0f) {
-        target = 180.0f;
-    }
+    (void)st->ang; /* 表项保留；出弧不再看 yaw */
 
     track_control_update(tsign);
 
-    if ((now - s_phase_ms) > MISSION_ARC_TMO_MS) {
+    if (elapsed > MISSION_ARC_TMO_MS) {
         mission_fail("arc_timeout");
         return;
     }
 
-    turned = wrap_deg(read_yaw() - s_yaw_enter);
-    if (sign < 0.0f) {
-        turned = -turned;
-    }
-    if (turned < 0.0f) {
-        turned = 0.0f;
+    if (track_get_on_count() > 0u) {
+        s_line_armed = true;
+        s_line_stable = 0u;
+        return;
     }
 
-    if ((now - s_phase_ms) >= MISSION_ARC_MIN_MS && turned >= (target - 5.0f)) {
+    /* 未见线：仅在已 arm 且过起步屏蔽后累计丢线 */
+    if (!s_line_armed || elapsed < min_ms) {
+        return;
+    }
+
+    if (s_line_stable < 255u) {
+        s_line_stable++;
+    }
+    if (s_line_stable >= MISSION_ARC_LOST_N) {
+        sys_log_text(mission, "event=arc_lost t=%ums", (unsigned)elapsed);
         next_step();
     }
 }
